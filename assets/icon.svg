@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="CheckIn">
+  <rect width="512" height="512" rx="112" fill="#171b24"/>
+  <path d="M112 176a56 56 0 0 1 56-56h176a56 56 0 0 1 56 56v96a56 56 0 0 1-56 56h-104l-72 56v-56h-0a56 56 0 0 1-56-56z"
+        fill="none" stroke="#f4f6fb" stroke-width="24" stroke-linejoin="round"/>
+  <circle cx="256" cy="224" r="46" fill="none" stroke="#2fd59b" stroke-width="20"/>
+  <path d="M256 194v32l22 16" fill="none" stroke="#2fd59b" stroke-width="18" stroke-linecap="round"/>
+</svg>

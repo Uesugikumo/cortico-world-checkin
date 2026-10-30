@@ -1,0 +1,66 @@
+{
+  "name": "cortico-world-checkin",
+  "version": "0.1.6",
+  "type": "module",
+  "description": "给 ta 一个信息源：从你的键鼠活动判断你在不在电脑前，必要时还能看一眼屏幕。陪伴更实在，也顺手当个小助手。",
+  "license": "MIT",
+  "author": "Uesugikumo (https://github.com/Uesugikumo)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Uesugikumo/cortico-world-checkin.git"
+  },
+  "homepage": "https://github.com/Uesugikumo/cortico-world-checkin#readme",
+  "bugs": {
+    "url": "https://github.com/Uesugikumo/cortico-world-checkin/issues"
+  },
+  "keywords": [
+    "cortico-world",
+    "cortico",
+    "coopanion",
+    "checkin",
+    "proactive",
+    "desktop-pet",
+    "companion",
+    "reminder",
+    "follow-up",
+    "presence",
+    "idle",
+    "screenshot"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "cortico": {
+    "kind": "world",
+    "api": 6,
+    "displayName": "Where Are You",
+    "icon": "assets/icon.svg",
+    "tags": [
+      "companion",
+      "apps",
+      "real-world",
+      "sensitive-data",
+      "experimental"
+    ],
+    "locales": {
+      "en": {
+        "displayName": "Where Are You",
+        "description": "Something new for it to sense: your keyboard and mouse activity tell it whether you are at the computer, and now and then it can glance at your screen. It makes the company feel more present — and adds a little assistant to the mix."
+      }
+    },
+    "describe": "describe.json",
+    "webUiClient": "dist/webui.js"
+  },
+  "files": [
+    "src",
+    "dist",
+    "assets",
+    "describe.json",
+    "README.md",
+    "CHANGELOG.md"
+  ]
+}

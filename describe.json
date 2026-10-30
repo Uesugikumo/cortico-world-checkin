@@ -1,0 +1,100 @@
+{
+  "tools": [
+    {
+      "name": "checkin_note",
+      "tags": [
+        "write"
+      ],
+      "summary": "记下一件以后要回头问的事",
+      "description": "记下一件以后要回头问的事（他约了人、说要修东西、明天要早起这类）。到点会有人提醒你。别把每句话都记成待办，只记真的会想知道结果的那些。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "要跟进的事，一句短话"
+          },
+          "afterMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10080,
+            "description": "过多少分钟再来提；不给就两小时"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "checkin_list",
+      "tags": [
+        "read"
+      ],
+      "summary": "看还有哪些挂着要跟进的事",
+      "description": "看现在还有哪些挂着要跟进的事，以及各自什么时候提。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "checkin_done",
+      "tags": [
+        "write"
+      ],
+      "summary": "把一条跟进标掉",
+      "description": "这件事有结果了、不用再问，标掉它；也可以用来放弃。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "编号，写前几位就行"
+          },
+          "text": {
+            "type": "string",
+            "description": "或者写这件事里的几个字"
+          }
+        }
+      }
+    },
+    {
+      "name": "checkin_activity",
+      "tags": [
+        "read"
+      ],
+      "summary": "看他现在在电脑前做什么",
+      "description": "看他现在在电脑前做什么：前台程序、窗口标题、多久没动键鼠、最近一小时换过哪些程序。别每轮都念。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    }
+  ],
+  "events": [
+    {
+      "type": "checkin.due",
+      "tags": [
+        "speak"
+      ],
+      "description": "一条跟进到点了：正文写着当初记下的事和现在的时间。"
+    },
+    {
+      "type": "checkin.activity",
+      "tags": [
+        "speak"
+      ],
+      "description": "一个可以搭话的由头：他在同一个程序前待了很久、他连着戳了两下桌宠、或者他离开一阵子又回来了。"
+    },
+    {
+      "type": "checkin.away",
+      "tags": [],
+      "description": "他离开电脑一阵子还没回来：正文里写着 QQ 目标和判断口径，决定要不要用 qq_send 问一句。"
+    }
+  ]
+}

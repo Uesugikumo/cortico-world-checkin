@@ -22,7 +22,6 @@ function mountProbe(ctx) {
   const intervalText = ui.h('span', 'mono', '—');
   const rateText = ui.h('span', 'mono', '—');
   const awayText = ui.h('span', 'mono', '—');
-  const askText = ui.h('span', 'mono', '—');
   const backPill = ui.pill('—', 'plain');
   const procText = ui.h('span', 'mono', '—');
   const titleText = ui.h('span', 'mono', '—');
@@ -39,7 +38,6 @@ function mountProbe(ctx) {
     ui.field('采样间隔', intervalText),
     ui.field('今天已说', rateText),
     ui.field('离开判定 / 回来问候', awayText),
-    ui.field('走久了在 QQ 上问一句', askText),
     ui.field('现在', backPill),
     ui.section('当前采集到的信息'),
     ui.field('前台程序', procText),
@@ -100,12 +98,6 @@ function mountProbe(ctx) {
     awayText.textContent = `${away} 分钟没动键鼠算离开 · 回来${st.backNudge === false ? '不说' : '说一句'}`;
     if (st.awaySince) { backPill.textContent = '人不在'; backPill.className = 'pill off'; }
     else { backPill.textContent = '在'; backPill.className = 'pill on'; }
-    const raw = String(st.qqAskTo || '').trim();
-    const target = raw.startsWith('group:') ? `群 ${raw.slice(6)}` : raw ? `QQ ${raw.replace(/^private:/, '')}` : '';
-    const after = Number.isFinite(st.askAfterMinutes) ? st.askAfterMinutes : 30;
-    askText.textContent = target
-      ? `离开 ${after} 分钟后问 ${target}${st.awayAsked ? ' · 这趟问过了' : ''}`
-      : '关着（没填 QQ 号或群号）';
   }
 
   function say(text, bad) {

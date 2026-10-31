@@ -12,6 +12,8 @@ export interface CheckinText {
   groupPetDescription: string;
   groupAwayTitle: string;
   groupAwayDescription: string;
+  groupLimitTitle: string;
+  groupLimitDescription: string;
   watchTitle: string;
   watchDescription: string;
   quietFromTitle: string;
@@ -44,10 +46,6 @@ export interface CheckinText {
   backDescription: string;
   staleTitle: string;
   staleDescription: string;
-  askTitle: string;
-  askDescription: string;
-  askToTitle: string;
-  askToDescription: string;
   promptDocTitle: string;
   promptDocDescription: string;
   panelProbeTitle: string;
@@ -63,11 +61,13 @@ const ZH: CheckinText = {
   lampHintOff: '只跟进挂着的事，不看窗口',
   badgePending: '待跟进',
   groupTalkTitle: '搭话',
-  groupTalkDescription: '它多久递一个由头、一天最多说几条、什么时候闭嘴。',
+  groupTalkDescription: '它看不看前台窗口、搭话要不要带截图、多久看一眼、在同一个程序前待多久才会递由头。',
   groupPetTitle: '桌宠上的动作',
-  groupPetDescription: '摸它、戳它之后会发生什么；搭话要不要带截图也在这组。',
+  groupPetDescription: '摸它、戳它之后会发生什么。',
   groupAwayTitle: '离开与回来',
-  groupAwayDescription: '人走开了它怎么看、回来时说一句、走久了要不要在 QQ 上问一声。',
+  groupAwayDescription: '人走开了它怎么看、回来时说一句。想在 QQ 上问，交给提示词和 QQ 那边的工具，这里不再填目标。',
+  groupLimitTitle: '限制',
+  groupLimitDescription: '两条之间隔多久、一小时和一天最多几条、哪段时间闭嘴。',
   watchTitle: '看前台窗口',
   watchDescription: '隔一段时间记一下前台是哪个程序（只看进程名和窗口标题，不落盘）。关掉就只做跟进。',
   quietFromTitle: '安静从',
@@ -101,10 +101,6 @@ const ZH: CheckinText = {
   backDescription: '你走开过一阵子又回来，它可以说一句「回来啦」。半小时内最多一次，安静时段不说。',
   staleTitle: '提醒过的跟进多久清掉',
   staleDescription: '一条跟进提醒过一次、之后一直没有结果，过了这么久就自己从列表里清掉（5–1440）。从来没提醒到的保留三天。',
-  askTitle: '走多久后在 QQ 问',
-  askDescription: '离开超过这么久还没回来，就递一个由头，让它决定要不要用 qq_send 问一句。安静时段不问。',
-  askToTitle: '问哪个 QQ 或群',
-  askToDescription: '填 QQ 号就是私聊（例如 123456789）。想发到群里，写「群123456」或「群:123456」。留空就只在桌面上等着，不走 QQ。',
   promptDocTitle: 'Where Are You 提示词',
   promptDocDescription: '告诉模型什么时候该开口、什么时候闭嘴。',
   panelProbeTitle: '状态',
@@ -120,11 +116,13 @@ const EN: CheckinText = {
   lampHintOff: 'Following up on notes only',
   badgePending: 'Pending',
   groupTalkTitle: 'Small talk',
-  groupTalkDescription: 'How often a reason to speak arrives, how many lines a day, and when to stay quiet.',
+  groupTalkDescription: 'Whether it watches the foreground window, whether speaking up comes with a screenshot, how often it samples, and how long you must stay in one app before it offers a reason to speak.',
   groupPetTitle: 'Pet actions',
-  groupPetDescription: 'What a pet or a poke does; whether speaking up comes with a screenshot.',
+  groupPetDescription: 'What a poke or a pet does.',
   groupAwayTitle: 'Away and back',
-  groupAwayDescription: 'How it reads you stepping away, says a line when you return, and whether to ask on QQ.',
+  groupAwayDescription: 'How it reads you stepping away, and says a line when you return. Asking on QQ is left to the prompt and the QQ tools — no target is configured here.',
+  groupLimitTitle: 'Limits',
+  groupLimitDescription: 'The gap between check-ins, hourly and daily caps, and when to stay quiet.',
   watchTitle: 'Watch foreground window',
   watchDescription: 'Occasionally records which process is in front (process name and window title only — nothing written to disk or sent anywhere). Turn off to keep follow-ups only.',
   quietFromTitle: 'Quiet from',
@@ -158,10 +156,6 @@ const EN: CheckinText = {
   backDescription: 'May say a line when you return after being away. At most once every half hour, never in quiet hours.',
   staleTitle: 'Auto-clear asked follow-ups',
   staleDescription: 'A follow-up that was raised once and never resolved is dropped from the list after this long (5-1440). Never-raised ones are kept for three days.',
-  askTitle: 'Ask on QQ after being away',
-  askDescription: 'Away longer than this and still not back: hand it a cue to decide whether to ask via qq_send. Never during quiet hours.',
-  askToTitle: 'Which QQ or group',
-  askToDescription: 'A QQ number is a private chat (e.g. 123456789). To ask in a group, write 群123456 or group:123456. Empty means it just waits on the desktop.',
   promptDocTitle: 'Where Are You prompt',
   promptDocDescription: 'Tells the model when to speak up and when to stay silent.',
   panelProbeTitle: 'Status',

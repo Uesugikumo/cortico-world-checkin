@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { Language } from 'cortico/core/language.ts';
 import type { BlobInput, ToolDef, World, WorldHost, WorldLamp, WorldWebUiDecl } from 'cortico/core/types.ts';
 import { briefTitle, isSelfApp, isWatchingVideo, sampleForeground, type Sample } from './activity.ts';
-import { checkinConfigGroups, qqTarget, type CheckinConfigSection } from './config.ts';
+import { checkinConfigGroups, type CheckinConfigSection } from './config.ts';
 import { captureScreen } from './shot.ts';
 import { ThreadStore, type Thread } from './store.ts';
 import { text } from './strings.ts';
@@ -93,7 +93,7 @@ export class CheckinWorld implements World {
   private awaySince: number | null = null;
   /** 上次说「回来啦」的时刻。 */
   private lastBackAt = 0;
-  /** 这一趟「人不在」有没有在 QQ 上问过（回来就复位）。 */
+  /** 这一趟「人不在」有没有递过「他走久了」的由头（回来就复位）。 */
   private awayAsked = false;
 
   constructor(deps: Deps) {
@@ -117,20 +117,9 @@ export class CheckinWorld implements World {
     return clamped * 60_000;
   }
 
-  /** 离开多久之后才在 QQ 上问一句，夹在 0–720 分钟（0 = 与离开判定同时）。 */
-  private askAfterMinutes(): number {
-    const min = Math.round(Number(this.cfg.askAfterMinutes));
-    return Number.isFinite(min) ? Math.min(720, Math.max(0, min)) : 30;
-  }
-
   /** 陪伴默认是开的；老配置里没有这个键，不能因此当成关。 */
   private companionEnabled(): boolean {
     return this.cfg.companion !== false;
-  }
-
-  /** 设置里填的 QQ 目标，纯数字补成 private:<号>（面板上只要填号）。 */
-  private qqAwayTarget(): string {
-    return qqTarget(this.cfg.qqAskTo);
   }
 
   /** 现在生效的门槛（配置是热更新的，每次现读）。 */
@@ -153,7 +142,6 @@ export class CheckinWorld implements World {
   envPromptVars(): Record<string, string> {
     const now = Date.now();
     const lim = this.limits();
-    const ask = this.qqAwayTarget();
     // 名字统一用 `<world id>.<变量>`，和 console.pin / lite.now 一样，值表是全 World 合并的，靠点号当命名空间。
     const vars: Record<string, string> = {
       'checkin.now': this.clockText(now),
@@ -166,9 +154,7 @@ export class CheckinWorld implements World {
         lim.gap > 0 ? `两条之间至少隔 ${lim.gap} 分钟` : '两条之间不设间隔',
         `同一个程序得先连续待满 ${lim.sameApp} 分钟`,
       ].join('、'),
-      'checkin.ask': ask
-        ? `他离开超过 ${this.askAfterMinutes()} 分钟还没回来，会把 QQ 目标（${ask}）递给你。`
-        : '他走久了不会走 QQ，只在桌面上等你回来。',
+      'checkin.away': '他离开一阵还没回来时会给你一个由头；想在 QQ 上问一句，就自己去 QQ 那边的工具里找会话，不想找就先等着。',
       'checkin.companion': this.companionEnabled()
         ? `陪着看 ${this.companionMinutes()} 分钟，每 ${Math.round(this.companionEveryMs() / 60_000)} 分钟递一眼（一共 ${this.companionTotal()} 眼，第一眼带 speak）`
         : '连着摸你两下已经关掉了，收不到这种陪伴',
@@ -179,7 +165,7 @@ export class CheckinWorld implements World {
     vars.checkin_pending = vars['checkin.pending'];
     vars.checkin_watch = vars['checkin.watch'];
     vars.checkin_limits = vars['checkin.limits'];
-    vars.checkin_ask = vars['checkin.ask'];
+    vars.checkin_away = vars['checkin.away'];
     vars.checkin_companion = vars['checkin.companion'];
     return vars;
   }
@@ -232,7 +218,7 @@ export class CheckinWorld implements World {
             { name: 'checkin.pending', description: zh ? '还挂着的跟进条数。' : 'How many follow-ups are still open.' },
             { name: 'checkin.watch', description: zh ? '有没有在观察前台窗口。' : 'Whether foreground windows are being watched.' },
             { name: 'checkin.limits', description: zh ? '一天/每小时上限、两条之间的最短间隔、同一个程序的门槛。' : 'Daily and hourly caps, the minimum gap, and the per-app threshold.' },
-            { name: 'checkin.ask', description: zh ? '走久了会不会在 QQ 上问一句，以及问给谁。' : 'Whether it asks on QQ when you are away, and who it asks.' },
+            { name: 'checkin.away', description: zh ? '他走久了会给一个由头；要不要在 QQ 上问、问给谁，交给模型自己找。' : 'A cue arrives when you have been away for a while; whether to ask on QQ and who to ask is up to the model.' },
             { name: 'checkin.companion', description: zh ? '连摸两下之后陪多久、隔多久递一眼、一共几眼。' : 'How long the post-pet company lasts, how often a glance arrives, and how many glances in total.' },
           ],
         },
@@ -508,25 +494,21 @@ export class CheckinWorld implements World {
   }
 
   /**
-   * 人走了好一阵还没回来，就在 QQ 上问一句。
-   * 扩展自己发不了 QQ：发消息是另一个 World 的工具，World 之间不能互调，
-   * 所以这里只推一条「由头」，让模型自己决定发不发、说什么。
+   * 人走了好一阵还没回来，递一个由头。
+   * 扩展自己发不了 QQ，也不再存「问给谁」：发消息是另一个 World 的工具，World 之间不能互调，
+   * 所以这里只把「他可能走开了」这件事递过去，去哪儿问、要不要问，都交给模型看工具列表决定。
    */
   private async maybeAskAway(sample: Sample, now: number): Promise<void> {
     const host = this.host;
     if (!host) return;
-    const target = this.qqAwayTarget();
-    if (!target) return;
     if (this.awayAsked) return;
     if (this.awaySince === null) return;
-    const after = Math.max(0, Math.min(720, Math.round(Number(this.cfg.askAfterMinutes) || 0)));
     const awayMs = now - this.awaySince;
-    if (awayMs < after * 60_000) return;
+    if (awayMs < this.awayThreshold(sample)) return;
     if (this.inQuiet(now)) return;
     this.awayAsked = true;
     const minutes = Math.round(awayMs / 60_000);
     const spent = awayMs >= BACK_LONG_MS ? `大约 ${Math.round(minutes / 60)} 小时` : `大约 ${minutes} 分钟`;
-    const where = target.startsWith('group:') ? `${target}（目标是个群，话别太私密）` : target;
     // 这时候屏幕上多半是锁屏，截了也没用，还白费 token，所以不带图。
     const body =
       `使用者已经离开电脑${spent}了（走之前前台是「${sample.proc || '（不知道）'}」）。` +
@@ -536,10 +518,10 @@ export class CheckinWorld implements World {
       '再看一眼有没有课程表这类安排（装了 timetable_list 就查一下），这会儿他是不是本来就有课、有自习、有安排。\n' +
       '有答案就按答案来，不用问：本来在上课/有事，人不在是正常的，别说「人呢」「翘课了」这种话，' +
       '等他回来再顺口说一句「下课啦」就够。\n' +
-      `真的一点线索都没有，再用 qq_send 发到 ${where} 问一句人去哪了、什么时候回来——` +
-      '一两句话，别追问、别连着发第二条。\n' +
+      '真的一点线索都没有、又确实想问问，就自己看一眼工具列表里有没有 QQ 那边的发送工具（别猜工具名，' +
+      '没有就是没装）；有的话优先发给他本人，别往群里发。一两句话，别追问、别连着发第二条。\n' +
       '问完把这件事记进待跟进（checkin_note，比如「他说出去一趟，回来问问顺不顺利」），' +
-      '这样等他回话或者人回来了，你手里有账可对。';
+      '这样等他回话或者人回来了，你手里有账可对。找不到工具、或者拿不准该发给谁，就什么都不做，等着。';
     try {
       await host.pushEvent(
         {
@@ -548,13 +530,13 @@ export class CheckinWorld implements World {
           source: this.id,
           text: body,
           tags: [],
-          meta: { proc: sample.proc, awayMinutes: minutes, idleMs: sample.idleMs, target },
+          meta: { proc: sample.proc, awayMinutes: minutes, idleMs: sample.idleMs, back: false },
         },
         { trigger: 'flush' },
       );
     } catch (err) {
       this.awayAsked = false;
-      host.log.warn(`checkin: QQ 问话的由头没递出去：${msg(err)}`);
+      host.log.warn(`checkin: 离开的由头没递出去：${msg(err)}`);
     }
   }
 
@@ -812,8 +794,6 @@ export class CheckinWorld implements World {
       streakMinutes: this.continuousMinutes(),
       pending: this.store.pending().length,
       staleMinutes: Math.round(this.staleAskedMs() / 60_000),
-      askAfterMinutes: this.askAfterMinutes(),
-      qqAskTo: this.qqAwayTarget(),
       awayAsked: this.awayAsked,
       limits: lim,
       saidToday: soft.day === this.dayKey(now) ? soft.count : 0,

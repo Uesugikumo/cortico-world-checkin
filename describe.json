@@ -94,7 +94,7 @@
     {
       "type": "checkin.away",
       "tags": [],
-      "description": "他离开电脑一阵子还没回来：正文里写着 QQ 目标和判断口径，决定要不要用 qq_send 问一句。"
+      "description": "他离开电脑一阵子还没回来：正文写着他走了多久、离开前在做什么，让你自己判断要不要、以及去哪儿问一句。"
     },
     {
       "type": "checkin.companion",

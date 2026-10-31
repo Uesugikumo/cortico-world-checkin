@@ -39,10 +39,6 @@ export const CHECKIN_DEFAULTS = {
   backNudge: true,
   /** 提醒过一次的跟进，过多久还没结果就自己清掉（分钟） */
   staleMinutes: 60,
-  /** 离开超过这么久还没回来，才在 QQ 上问一句（分钟；0 = 跟离开判定同时） */
-  askAfterMinutes: 30,
-  /** QQ 问话的目标；填 QQ 号就行，留空 = 不走 QQ */
-  qqAskTo: '',
 } as const;
 
 /** config.json 的 `worlds.checkin` 节。 */
@@ -64,22 +60,6 @@ export interface CheckinConfigSection {
   awayMinutes: number;
   backNudge: boolean;
   staleMinutes: number;
-  askAfterMinutes: number;
-  qqAskTo: string;
-}
-
-/**
- * 把设置里填的东西变成 qq_send 认的目标。
- * 面板上只让人填号：纯数字 = 私聊（补上 `private:`）；写「群123456」/「群:123456」/「qun:123456」= 群聊；
- * 写全了 `private:…` / `group:…` 的也原样照用。
- */
-export function qqTarget(raw: unknown): string {
-  const s = String(raw ?? '').trim();
-  if (!s) return '';
-  const group = /^(?:群聊?|qun|group|g)\s*[:：]?\s*(\d{5,12})$/i.exec(s);
-  if (group) return `group:${group[1]}`;
-  if (/^\d{5,12}$/.test(s)) return `private:${s}`;
-  return s;
 }
 
 /** 单位都走 `x-suffix`，标题里就不再写「（分钟）」这类后缀了。 */
@@ -90,6 +70,7 @@ const LINE = '条';
 /**
  * 设置页按语义拆成四组（框架把每个 ConfigGroup 渲染成一个独立小节，
  * 保存也是按组提交，改一组不会牵连另一组）。
+ * 顺序按「平时会动」往下排：看窗口和截图在最前，条数/间隔/安静时段并进「限制」放最下面。
  */
 export function checkinConfigGroups(language: Language): ConfigGroup[] {
   const t = text(language);
@@ -109,6 +90,12 @@ export function checkinConfigGroups(language: Language): ConfigGroup[] {
             'x-hot': true,
             description: t.watchDescription,
           },
+          'worlds.checkin.screenshot': {
+            type: 'boolean',
+            title: t.screenshotTitle,
+            'x-hot': true,
+            description: t.screenshotDescription,
+          },
           'worlds.checkin.sampleSeconds': {
             type: 'integer',
             title: t.sampleTitle,
@@ -127,45 +114,6 @@ export function checkinConfigGroups(language: Language): ConfigGroup[] {
             'x-suffix': MINUTE,
             description: t.sameAppDescription,
           },
-          'worlds.checkin.softGapMinutes': {
-            type: 'integer',
-            title: t.softGapTitle,
-            minimum: 0,
-            maximum: 480,
-            'x-hot': true,
-            'x-suffix': MINUTE,
-            description: t.softGapDescription,
-          },
-          'worlds.checkin.softPerHour': {
-            type: 'integer',
-            title: t.softPerHourTitle,
-            minimum: 0,
-            maximum: 12,
-            'x-hot': true,
-            'x-suffix': LINE,
-            description: t.softPerHourDescription,
-          },
-          'worlds.checkin.softPerDay': {
-            type: 'integer',
-            title: t.softPerDayTitle,
-            minimum: 0,
-            maximum: 24,
-            'x-hot': true,
-            'x-suffix': LINE,
-            description: t.softPerDayDescription,
-          },
-          'worlds.checkin.quietFrom': {
-            type: 'string',
-            title: t.quietFromTitle,
-            'x-hot': true,
-            description: t.quietFromDescription,
-          },
-          'worlds.checkin.quietTo': {
-            type: 'string',
-            title: t.quietToTitle,
-            'x-hot': true,
-            description: t.quietToDescription,
-          },
         },
       },
     },
@@ -177,12 +125,6 @@ export function checkinConfigGroups(language: Language): ConfigGroup[] {
         title: t.groupPetTitle,
         description: t.groupPetDescription,
         properties: {
-          'worlds.checkin.screenshot': {
-            type: 'boolean',
-            title: t.screenshotTitle,
-            'x-hot': true,
-            description: t.screenshotDescription,
-          },
           'worlds.checkin.pokeNudge': {
             type: 'boolean',
             title: t.pokeTitle,
@@ -224,6 +166,12 @@ export function checkinConfigGroups(language: Language): ConfigGroup[] {
         title: t.groupAwayTitle,
         description: t.groupAwayDescription,
         properties: {
+          'worlds.checkin.backNudge': {
+            type: 'boolean',
+            title: t.backTitle,
+            'x-hot': true,
+            description: t.backDescription,
+          },
           'worlds.checkin.awayMinutes': {
             type: 'integer',
             title: t.awayTitle,
@@ -233,27 +181,55 @@ export function checkinConfigGroups(language: Language): ConfigGroup[] {
             'x-suffix': MINUTE,
             description: t.awayDescription,
           },
-          'worlds.checkin.backNudge': {
-            type: 'boolean',
-            title: t.backTitle,
-            'x-hot': true,
-            description: t.backDescription,
-          },
-          'worlds.checkin.askAfterMinutes': {
+        },
+      },
+    },
+    {
+      id: 'world:checkin.limit',
+      owner,
+      schema: {
+        type: 'object',
+        title: t.groupLimitTitle,
+        description: t.groupLimitDescription,
+        properties: {
+          'worlds.checkin.softGapMinutes': {
             type: 'integer',
-            title: t.askTitle,
+            title: t.softGapTitle,
             minimum: 0,
-            maximum: 720,
+            maximum: 480,
             'x-hot': true,
             'x-suffix': MINUTE,
-            description: t.askDescription,
+            description: t.softGapDescription,
           },
-          'worlds.checkin.qqAskTo': {
-            type: 'string',
-            title: t.askToTitle,
+          'worlds.checkin.softPerHour': {
+            type: 'integer',
+            title: t.softPerHourTitle,
+            minimum: 0,
+            maximum: 12,
             'x-hot': true,
-            description: t.askToDescription,
-            placeholder: '123456789',
+            'x-suffix': LINE,
+            description: t.softPerHourDescription,
+          },
+          'worlds.checkin.softPerDay': {
+            type: 'integer',
+            title: t.softPerDayTitle,
+            minimum: 0,
+            maximum: 24,
+            'x-hot': true,
+            'x-suffix': LINE,
+            description: t.softPerDayDescription,
+          },
+          'worlds.checkin.quietFrom': {
+            type: 'string',
+            title: t.quietFromTitle,
+            'x-hot': true,
+            description: t.quietFromDescription,
+          },
+          'worlds.checkin.quietTo': {
+            type: 'string',
+            title: t.quietToTitle,
+            'x-hot': true,
+            description: t.quietToDescription,
           },
         },
       },

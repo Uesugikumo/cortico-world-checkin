@@ -12,8 +12,6 @@ export interface CheckinText {
   groupPetDescription: string;
   groupAwayTitle: string;
   groupAwayDescription: string;
-  groupOtherTitle: string;
-  groupOtherDescription: string;
   watchTitle: string;
   watchDescription: string;
   quietFromTitle: string;
@@ -70,8 +68,6 @@ const ZH: CheckinText = {
   groupPetDescription: '摸它、戳它之后会发生什么；搭话要不要带截图也在这组。',
   groupAwayTitle: '离开与回来',
   groupAwayDescription: '人走开了它怎么看、回来时说一句、走久了要不要在 QQ 上问一声。',
-  groupOtherTitle: '其他',
-  groupOtherDescription: '采样间隔和跟进记录自动清理。一般不用动。',
   watchTitle: '看前台窗口',
   watchDescription: '隔一段时间记一下前台是哪个程序（只看进程名和窗口标题，不落盘）。关掉就只做跟进。',
   quietFromTitle: '安静从',
@@ -114,7 +110,7 @@ const ZH: CheckinText = {
   panelProbeTitle: '状态',
   panelProbeDescription: '它现在看到的画面、采样间隔、今天说了几条，都在这页；整页只读。',
   panelPendingTitle: '待跟进',
-  panelPendingDescription: '它记着以后要回头问的事：到点会自己提，这里可以先看，也可以直接结掉。',
+  panelPendingDescription: '它记着以后要回头问的事：到点会自己提，这里可以先看，也可以直接结掉。提醒过一次、之后一直没有结果的会自动清掉，清多久也算在这页。',
 };
 
 const EN: CheckinText = {
@@ -129,8 +125,6 @@ const EN: CheckinText = {
   groupPetDescription: 'What a pet or a poke does; whether speaking up comes with a screenshot.',
   groupAwayTitle: 'Away and back',
   groupAwayDescription: 'How it reads you stepping away, says a line when you return, and whether to ask on QQ.',
-  groupOtherTitle: 'Other',
-  groupOtherDescription: 'Sampling interval and auto-clearing of raised follow-ups. Rarely worth touching.',
   watchTitle: 'Watch foreground window',
   watchDescription: 'Occasionally records which process is in front (process name and window title only — nothing written to disk or sent anywhere). Turn off to keep follow-ups only.',
   quietFromTitle: 'Quiet from',
@@ -173,7 +167,7 @@ const EN: CheckinText = {
   panelProbeTitle: 'Status',
   panelProbeDescription: 'What it sees right now, the sampling interval, and how much it has said today — read only.',
   panelPendingTitle: 'Pending follow-ups',
-  panelPendingDescription: 'Things it means to ask you about later: raised when due. See them here, or close them now.',
+  panelPendingDescription: 'Things it means to ask you about later: raised when due. See them here, or close them now. One that was raised once and never resolved clears itself after a while — how long is set on this page.',
 };
 
 export function text(language: Language): CheckinText {

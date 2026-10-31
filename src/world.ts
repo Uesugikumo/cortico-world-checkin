@@ -59,6 +59,8 @@ interface Deps {
   dataDir: string;
   cfg: CheckinConfigSection;
   timezone: string;
+  /** 写回 config.json（框架的 ctx.persist）；面板上改的那一项要靠它落盘。 */
+  persist?: (patch: Record<string, unknown>) => void;
 }
 
 export class CheckinWorld implements World {
@@ -851,8 +853,11 @@ export class CheckinWorld implements World {
     throw new Error(`不认识的方法：${method}`);
   }
 
-  /** 「待跟进」面板：列出还没结掉的事，也能在这里直接结掉一条。 */
-  private pendingPanel(method: string, args: unknown[]): Record<string, unknown> {
+  /**
+   * 「待跟进」面板：列出还没结掉的事，也能直接结掉一条，
+   * 「提醒过之后多久自己清掉」这项也放在这里改（它只影响这一栏里的东西）。
+   */
+  private async pendingPanel(method: string, args: unknown[]): Promise<Record<string, unknown>> {
     const now = Date.now();
     if (method === 'close') {
       const opts = (args[0] ?? {}) as { id?: unknown };
@@ -861,6 +866,13 @@ export class CheckinWorld implements World {
       const hit = this.store.find({ id });
       if (!hit) throw new Error(`没找到 #${id}（可能已经结掉了）。`);
       this.store.close(hit.id, 'done');
+    } else if (method === 'save') {
+      const opts = (args[0] ?? {}) as { staleMinutes?: unknown };
+      const raw = Number(opts.staleMinutes);
+      if (!Number.isFinite(raw)) throw new Error('清掉的时长要填数字（分钟）。');
+      const minutes = Math.min(1440, Math.max(5, Math.round(raw)));
+      this.cfg.staleMinutes = minutes;
+      this.deps.persist?.({ staleMinutes: minutes });
     } else if (method !== 'list') {
       throw new Error(`不认识的方法：${method}`);
     }

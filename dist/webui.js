@@ -135,17 +135,29 @@ function mountPending(ctx) {
   const ui = ctx.ui;
   const sheet = ui.sheet({
     title: '待跟进',
-    desc: '它记着以后要回头问的事。到点会自己提，这里可以先看，也能直接结掉。提醒过一次、之后一直没结果的会自动清掉。',
+    desc: '它记着以后要回头问的事。到点会自己提，这里可以先看，也能直接结掉。提醒过一次、之后一直没有结果的会自动清掉，清多久就在下面改。',
   });
 
   const table = ui.table({ head: ['#', '要跟进的事', '什么时候提', ''], maxHeight: '320px' });
   const totalText = ui.h('span', 'mono', '—');
+  const staleInput = ui.input({ type: 'number', value: '60', placeholder: '60', cls: 'mono' });
+  const staleInputBar = ui.rowbar();
+  staleInputBar.append(staleInput);
+  const staleHint = ui.h('div', 'tdesc', '提醒过一次、之后一直没有结果的跟进，过了这么久就从列表里清掉。');
   const message = ui.msgline('');
+  const saveBtn = ui.button('存', { size: 'sm', onClick: () => void saveStale() });
   const refreshBtn = ui.button('刷新', { size: 'sm', onClick: () => void refresh() });
   const bar = ui.rowbar();
-  bar.append(refreshBtn);
+  bar.append(saveBtn, refreshBtn);
 
-  sheet.body.append(ui.field('共几条', totalText), table.el, bar, message);
+  sheet.body.append(
+    ui.field('共几条', totalText),
+    table.el,
+    ui.field('提醒过的跟进多久清掉（分钟，5–1440）', staleInputBar),
+    staleHint,
+    bar,
+    message,
+  );
   ctx.root.appendChild(sheet.el);
 
   let busy = false;
@@ -175,10 +187,42 @@ function mountPending(ctx) {
     }
   }
 
+  async function saveStale() {
+    if (busy) return;
+    const raw = Number(staleInput.value);
+    if (!Number.isFinite(raw)) {
+      say('这里要填数字（分钟）。', true);
+      return;
+    }
+    const minutes = Math.min(1440, Math.max(5, Math.round(raw)));
+    busy = true;
+    saveBtn.disabled = true;
+    refreshBtn.disabled = true;
+    try {
+      const res = await ctx.invoke('save', [{ staleMinutes: minutes }]);
+      if (ctx.signal && ctx.signal.aborted) return;
+      render(res);
+      say(`提醒过的跟进 ${minutes} 分钟没结果就自动清掉了。`, false);
+      ui.toast('存好了', 'ok');
+    } catch (err) {
+      if (ctx.signal && ctx.signal.aborted) return;
+      say(`没存上：${errText(err)}`, true);
+      ui.toast('没存上', 'bad');
+    } finally {
+      busy = false;
+      saveBtn.disabled = false;
+      refreshBtn.disabled = false;
+    }
+  }
+
   function render(res) {
     const list = (res && Array.isArray(res.threads) ? res.threads : []).slice();
     const stale = res && Number.isFinite(res.staleMinutes) ? res.staleMinutes : 60;
     totalText.textContent = `${list.length} 条（提醒过的 ${stale} 分钟没结果会自动清）`;
+    if (typeof document === 'undefined' || document.activeElement !== staleInput) {
+      staleInput.value = String(stale);
+    }
+    staleHint.textContent = `提醒过一次、之后一直没有结果的跟进，过了 ${stale} 分钟就从列表里清掉。`;
     table.clear(list.length ? '' : '还没有要跟进的事。');
     for (const t of list) {
       const btn = ui.button('结掉', { size: 'sm', onClick: () => void closeOne(t.id) });

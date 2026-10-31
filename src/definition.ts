@@ -89,5 +89,6 @@ export const CHECKIN: WorldDefinition<CheckinConfigSection> = {
       dataDir: ctx.dataDir,
       cfg: ctx.cfg,
       timezone: ctx.timezone,
+      persist: ctx.persist,
     }),
 };

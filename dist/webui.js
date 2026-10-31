@@ -127,7 +127,7 @@ function mountPending(ctx) {
   const ui = ctx.ui;
   const sheet = ui.sheet({
     title: '待跟进',
-    desc: '它记着以后要回头问的事。到点会自己提，这里可以先看，也能直接结掉。提醒过一次、之后一直没有结果的会自动清掉，清多久就在下面改。',
+    desc: '它记着以后要回头问的事。到点会自己提，这里可以先看，也能直接结掉。提醒过一次、之后一直没有结果的会自动清掉，清多久就在下面改（改完自动存）。',
   });
 
   const table = ui.table({ head: ['#', '要跟进的事', '什么时候提', ''], maxHeight: '320px' });
@@ -135,12 +135,11 @@ function mountPending(ctx) {
   const staleInput = ui.input({ type: 'number', value: '60', placeholder: '60', cls: 'mono' });
   const staleInputBar = ui.rowbar();
   staleInputBar.append(staleInput);
-  const staleHint = ui.h('div', 'tdesc', '提醒过一次、之后一直没有结果的跟进，过了这么久就从列表里清掉。');
+  const staleHint = ui.h('div', 'tdesc', '改个数字就存好，不用点按钮。');
   const message = ui.msgline('');
-  const saveBtn = ui.button('存', { size: 'sm', onClick: () => void saveStale() });
   const refreshBtn = ui.button('刷新', { size: 'sm', onClick: () => void refresh() });
   const bar = ui.rowbar();
-  bar.append(saveBtn, refreshBtn);
+  bar.append(refreshBtn);
 
   sheet.body.append(
     ui.field('共几条', totalText),
@@ -179,42 +178,76 @@ function mountPending(ctx) {
     }
   }
 
-  async function saveStale() {
-    if (busy) return;
+  let saving = false;
+  let saveAgain = false;
+  let saveTimer = 0;
+  let lastSaved = null;
+
+  /** 数字一变就存：输入时停顿 800ms 存一次，回车/离开输入框立刻存。 */
+  async function saveStale(quiet) {
+    if (saving) {
+      saveAgain = true;
+      return;
+    }
     const raw = Number(staleInput.value);
     if (!Number.isFinite(raw)) {
       say('这里要填数字（分钟）。', true);
+      if (lastSaved !== null) staleInput.value = String(lastSaved);
       return;
     }
     const minutes = Math.min(1440, Math.max(5, Math.round(raw)));
-    busy = true;
-    saveBtn.disabled = true;
-    refreshBtn.disabled = true;
+    if (minutes === lastSaved) return;
+    saving = true;
     try {
       const res = await ctx.invoke('save', [{ staleMinutes: minutes }]);
       if (ctx.signal && ctx.signal.aborted) return;
+      lastSaved = minutes;
+      const clamped = minutes !== Math.round(raw);
       render(res);
-      say(`提醒过的跟进 ${minutes} 分钟没结果就自动清掉了。`, false);
-      ui.toast('存好了', 'ok');
+      if (!quiet) say(`改了：提醒过的跟进 ${minutes} 分钟没结果就自动清掉。`, false);
+      ui.toast(clamped ? `按 ${minutes} 分钟算（范围 5–1440）` : '存好了', 'ok');
     } catch (err) {
       if (ctx.signal && ctx.signal.aborted) return;
       say(`没存上：${errText(err)}`, true);
       ui.toast('没存上', 'bad');
+      if (lastSaved !== null) staleInput.value = String(lastSaved);
     } finally {
-      busy = false;
-      saveBtn.disabled = false;
+      saving = false;
       refreshBtn.disabled = false;
+      if (saveAgain) {
+        saveAgain = false;
+        void saveStale(true);
+      }
     }
   }
+
+  function flushSave(quiet) {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = 0;
+    }
+    void saveStale(quiet);
+  }
+
+  staleInput.addEventListener('input', () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = 0;
+      void saveStale(true);
+    }, 800);
+  });
+  staleInput.addEventListener('change', () => flushSave(false));
+  staleInput.addEventListener('blur', () => flushSave(true));
 
   function render(res) {
     const list = (res && Array.isArray(res.threads) ? res.threads : []).slice();
     const stale = res && Number.isFinite(res.staleMinutes) ? res.staleMinutes : 60;
+    lastSaved = stale;
     totalText.textContent = `${list.length} 条（提醒过的 ${stale} 分钟没结果会自动清）`;
     if (typeof document === 'undefined' || document.activeElement !== staleInput) {
       staleInput.value = String(stale);
     }
-    staleHint.textContent = `提醒过一次、之后一直没有结果的跟进，过了 ${stale} 分钟就从列表里清掉。`;
+    staleHint.textContent = `改个数字就存好。提醒过一次、之后一直没有结果的跟进，过了 ${stale} 分钟自动清掉。`;
     table.clear(list.length ? '' : '还没有要跟进的事。');
     for (const t of list) {
       const btn = ui.button('结掉', { size: 'sm', onClick: () => void closeOne(t.id) });

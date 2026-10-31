@@ -129,21 +129,31 @@ export class CheckinWorld implements World {
   envPromptVars(): Record<string, string> {
     const now = Date.now();
     const lim = this.limits();
-    return {
-      checkin_now: this.clockText(now),
-      checkin_quiet: `${this.cfg.quietFrom}–${this.cfg.quietTo}`,
-      checkin_pending: String(this.store.pending().length),
-      checkin_watch: this.cfg.watchActivity ? '在观察前台窗口' : '没在观察窗口',
-      checkin_limits: [
+    const ask = this.qqAwayTarget();
+    // 名字统一用 `<world id>.<变量>`，和 console.pin / lite.now 一样，值表是全 World 合并的，靠点号当命名空间。
+    const vars: Record<string, string> = {
+      'checkin.now': this.clockText(now),
+      'checkin.quiet': `${this.cfg.quietFrom}–${this.cfg.quietTo}`,
+      'checkin.pending': String(this.store.pending().length),
+      'checkin.watch': this.cfg.watchActivity ? '在观察前台窗口' : '没在观察窗口',
+      'checkin.limits': [
         lim.perDay > 0 ? `一天最多 ${lim.perDay} 条` : '一天不限条数',
         lim.perHour > 0 ? `每小时最多 ${lim.perHour} 条` : '每小时不限',
         lim.gap > 0 ? `两条之间至少隔 ${lim.gap} 分钟` : '两条之间不设间隔',
         `同一个程序得先连续待满 ${lim.sameApp} 分钟`,
       ].join('、'),
-      checkin_ask: this.qqAwayTarget()
-        ? `他离开超过 ${this.askAfterMinutes()} 分钟还没回来，会把 QQ 目标（${this.qqAwayTarget()}）递给你。`
+      'checkin.ask': ask
+        ? `他离开超过 ${this.askAfterMinutes()} 分钟还没回来，会把 QQ 目标（${ask}）递给你。`
         : '他走久了不会走 QQ，只在桌面上等你回来。',
     };
+    // 0.1.7 及以前用的是下划线名；留一版别名，别人改过自己的 ENV_PROMPT 也不会渲染出裸的 {{…}}。
+    vars.checkin_now = vars['checkin.now'];
+    vars.checkin_quiet = vars['checkin.quiet'];
+    vars.checkin_pending = vars['checkin.pending'];
+    vars.checkin_watch = vars['checkin.watch'];
+    vars.checkin_limits = vars['checkin.limits'];
+    vars.checkin_ask = vars['checkin.ask'];
+    return vars;
   }
 
   tools(): ToolDef[] {

@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.1.7（未发布）
+## 0.1.8（未发布）
+
+- 提示词变量改成点号名：`{{checkin.now}}`、`{{checkin.quiet}}`、`{{checkin.watch}}`、`{{checkin.pending}}`、`{{checkin.limits}}`、`{{checkin.ask}}`。原来叫 `checkin_now` 这一套下划线名，和 `console.pin`、`lite.now`、`qq.self` 这些官方写法不一致；所有 World 的变量是合并进同一个值表的，点号才是命名空间。
+- 老的下划线名**留了一版别名**（`vars.checkin_now = vars['checkin.now']` 等六行），自己改过部署里 `ENV_PROMPT.md` 的人不会因为这次改名渲染出裸 `{{checkin_now}}`。下一个版本再删。
+- 部署副本 `worlds\checkin\ENV_PROMPT.md` 已跟着同步（前缀优先读它，不然线上还是旧占位符）。
+
+## 0.1.7（2026-10-30 发布）
 
 - 标签补 `injection-risk`（注入风险）：搭话、离开、待跟进这几类事件的正文里都会带 `窗口标题「…」`，而网页标题、聊天窗口标题是别人写的内容——等于把外部可控的字符串直接当内部通知喂给模型，按市场词表的定义就该标。能力没变，只是把已有的风险写在明面上。
 - npm keywords 补 `apps`、`real-world`，市场卡片能直接映射出「应用程序 / 现实环境」这两个普通标签（普通标签可以从 keywords 来，warning 类不行）。

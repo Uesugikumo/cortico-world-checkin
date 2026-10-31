@@ -1,6 +1,6 @@
 {
   "name": "cortico-world-checkin",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "type": "module",
   "description": "给 ta 一个信息源：从你的键鼠活动判断你在不在电脑前，必要时还能看一眼屏幕。陪伴更实在，也顺手当个小助手。",
   "license": "MIT",

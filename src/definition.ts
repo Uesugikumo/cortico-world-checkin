@@ -76,6 +76,12 @@ export const CHECKIN: WorldDefinition<CheckinConfigSection> = {
         tags: [],
         description: '他离开电脑一阵子还没回来：正文里写着 QQ 目标和判断口径，决定要不要用 qq_send 问一句。',
       },
+      {
+        type: 'checkin.companion',
+        tags: [],
+        description:
+          '他连着摸了你两下以上，接下来十分钟每两分钟递一眼他的屏幕（带截图）。第一眼带 speak，后面几眼只是看着，不必每眼都开口。',
+      },
     ],
   },
   create: (ctx) =>

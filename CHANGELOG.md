@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.9（未发布）
+
+- 新增**持续陪伴**：连着摸桌宠两下以上（`meta.touch.kind === 'pet'`，两下之间不超过 3.5 秒），接下来 10 分钟里每 2 分钟递一眼前台窗口的截图给模型，一共五眼。第一眼带 `speak` 标签允许开口打个招呼，后面几眼只是看着、不催它说话；十分钟到点自己停。
+- 新事件 `checkin.companion`（`meta: { proc, idleMs, companion: true, index, total, minutesLeft, selfNow }`），提示词里新增「他摸了你好几下」一节。
+- 新开关 `worlds.checkin.companion`（默认开，`x-hot`，面板上「连摸两下桌宠」）。**老配置里没有这个键**，所以代码按 `!== false` 判断——不补键也是开的；面板状态行会显示「摸着呢 · 还剩 N 分钟」。
+- 和「连戳两下」共用同一个 1 秒轮询的触碰游标，但各自数各自的：戳是戳、摸是摸，互不影响；两件都关掉才不轮询。
+
 ## 0.1.8（未发布）
 
 - 提示词变量改成点号名：`{{checkin.now}}`、`{{checkin.quiet}}`、`{{checkin.watch}}`、`{{checkin.pending}}`、`{{checkin.limits}}`、`{{checkin.ask}}`。原来叫 `checkin_now` 这一套下划线名，和 `console.pin`、`lite.now`、`qq.self` 这些官方写法不一致；所有 World 的变量是合并进同一个值表的，点号才是命名空间。

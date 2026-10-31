@@ -17,6 +17,7 @@ function mountProbe(ctx) {
 
   const shotPill = ui.pill('—', 'plain');
   const pokePill = ui.pill('—', 'plain');
+  const companionPill = ui.pill('—', 'plain');
   const watchPill = ui.pill('—', 'plain');
   const intervalText = ui.h('span', 'mono', '—');
   const rateText = ui.h('span', 'mono', '—');
@@ -33,6 +34,7 @@ function mountProbe(ctx) {
   sheet.body.append(
     ui.field('搭话时截图', shotPill),
     ui.field('连戳两下桌宠', pokePill),
+    ui.field('连摸两下桌宠', companionPill),
     ui.field('监测', watchPill),
     ui.field('采样间隔', intervalText),
     ui.field('今天已说', rateText),
@@ -88,6 +90,9 @@ function mountProbe(ctx) {
     else { shotPill.textContent = '开（没确认）'; shotPill.className = 'pill plain'; }
     if (st.pokeNudge === false) { pokePill.textContent = '关着'; pokePill.className = 'pill off'; }
     else { pokePill.textContent = '连戳两下就说话'; pokePill.className = 'pill on'; }
+    if (st.companion === false) { companionPill.textContent = '关着'; companionPill.className = 'pill off'; }
+    else if (st.companionNow) { companionPill.textContent = `陪着呢 · 还剩 ${st.companionLeft ?? 0} 分钟`; companionPill.className = 'pill on'; }
+    else { companionPill.textContent = '摸两下陪着看 10 分钟'; companionPill.className = 'pill on'; }
     const away = Number.isFinite(st.awayMinutes) ? st.awayMinutes : 15;
     awayText.textContent = `${away} 分钟没动键鼠算离开 · 回来${st.backNudge === false ? '不说' : '说一句'}`;
     if (st.awaySince) { backPill.textContent = '人不在'; backPill.className = 'pill off'; }

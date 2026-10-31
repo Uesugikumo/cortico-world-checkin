@@ -31,6 +31,14 @@ const POKE_POLL_MS = 1_000;
 const POKE_DOUBLE_MS = 3_500;
 /** 说了一句之后，这么久之内再戳也不再开口 */
 const POKE_MIN_GAP_MS = 20_000;
+/** 摸两下以上算「想让你陪着看一会儿」；两下之间最多隔这么久 */
+const PET_WINDOW_MS = 3_500;
+/** 摸几下才算数（一下是随手撸一把） */
+const PET_MIN_TOUCHES = 2;
+/** 这一趟陪着看多久 */
+const COMPANION_MS = 10 * 60_000;
+/** 陪着看的时候，隔这么久递一眼 */
+const COMPANION_EVERY_MS = 2 * 60_000;
 /** 两次「回来啦」之间至少隔多久（防止出门倒垃圾来回三次都被招呼） */
 const BACK_MIN_GAP_MS = 30 * 60_000;
 /** 离开超过这么久就不细说了（多半是睡了一觉/合盖） */
@@ -66,6 +74,15 @@ export class CheckinWorld implements World {
   private pokeSeen = 0;
   private pokeSeenAt = 0;
   private lastPokeAt = 0;
+  /** 这一小段时间里数到了几下「摸」：攒够两下就开始陪着看 */
+  private petSeen = 0;
+  private petSeenAt = 0;
+  /** 持续陪伴到什么时候；0 = 没在陪 */
+  private companionUntil = 0;
+  /** 下一眼安排在什么时候 */
+  private companionNextAt = 0;
+  /** 这一趟已经递了几眼 */
+  private companionCount = 0;
   private samples: Sample[] = [];
   private lastSampleAt = 0;
   private lastEvalAt = 0;
@@ -102,6 +119,11 @@ export class CheckinWorld implements World {
   private askAfterMinutes(): number {
     const min = Math.round(Number(this.cfg.askAfterMinutes));
     return Number.isFinite(min) ? Math.min(720, Math.max(0, min)) : 30;
+  }
+
+  /** 陪伴默认是开的；老配置里没有这个键，不能因此当成关。 */
+  private companionEnabled(): boolean {
+    return this.cfg.companion !== false;
   }
 
   /** 设置里填的 QQ 目标，纯数字补成 private:<号>（面板上只要填号）。 */
@@ -224,8 +246,8 @@ export class CheckinWorld implements World {
         `挂着 ${this.store.pending().length} 条`,
     );
 
-    // 连戳两下是他在跟你打招呼，跟「要不要监测前台」没关系，所以单独开关。
-    if (this.cfg.pokeNudge) this.startPokeWatch(host);
+    // 连戳两下是打招呼，连摸两下是陪着看一会儿；两件都跟「要不要监测前台窗口」没关系，各有开关。
+    if (this.cfg.pokeNudge || this.companionEnabled()) this.startPokeWatch(host);
   }
 
   async stop(): Promise<void> {
@@ -253,7 +275,8 @@ export class CheckinWorld implements World {
       void this.watchPoke();
     }, POKE_POLL_MS);
     this.pokeTimer.unref?.();
-    host.log.info('checkin: 连戳两下桌宠就去看一眼');
+    const what = [this.cfg.pokeNudge ? '连戳两下说话' : '', this.companionEnabled() ? '连摸两下陪着看' : ''].filter(Boolean);
+    host.log.info(`checkin: 盯着桌宠的触碰（${what.join('、')}）`);
   }
 
   private async watchPoke(): Promise<void> {
@@ -268,15 +291,26 @@ export class CheckinWorld implements World {
       if (latest <= this.pokeCursor) return;
       const events = host.store.range({ fromCursor: this.pokeCursor + 1, toCursor: latest, limit: 200 });
       this.pokeCursor = latest;
-      // 桌宠把 2.5 秒内的同种触碰合并成一条事件，实际戳了几下写在 meta.touch.count 里
+      // 桌宠把 2.5 秒内的同种触碰合并成一条事件，实际触碰几下写在 meta.touch.count 里
       // （连戳两下 = 一条事件、count 2），所以数的是 count，不是事件条数。
-      const pokes = events.reduce((n, e) => {
-        if (e.type !== POKE_TYPE || touchKind(e) !== 'poke') return n;
-        const count = Number((e.meta as { touch?: { count?: unknown } } | undefined)?.touch?.count);
-        return n + (Number.isFinite(count) && count > 0 ? Math.min(count, 10) : 1);
-      }, 0);
-      if (!pokes) return;
+      // 「摸」和「戳」分开数：摸是撸毛，戳是敲一下。
+      const touched = events.reduce(
+        (acc, e) => {
+          if (e.type !== POKE_TYPE) return acc;
+          const kind = touchKind(e);
+          if (kind !== 'poke' && kind !== 'pet') return acc;
+          const count = Number((e.meta as { touch?: { count?: unknown } } | undefined)?.touch?.count);
+          const n = Number.isFinite(count) && count > 0 ? Math.min(count, 10) : 1;
+          if (kind === 'pet') acc.pets += n;
+          else acc.pokes += n;
+          return acc;
+        },
+        { pokes: 0, pets: 0 },
+      );
       const now = Date.now();
+      if (touched.pets) this.notePets(touched.pets, now);
+      if (!touched.pokes) return;
+      const pokes = touched.pokes;
       // 合并窗口边缘可能拆成两条事件，所以也允许前后两次轮询凑够两下。
       this.pokeSeen = this.pokeSeenAt > 0 && now - this.pokeSeenAt <= POKE_DOUBLE_MS ? this.pokeSeen + pokes : pokes;
       this.pokeSeenAt = now;
@@ -330,6 +364,84 @@ export class CheckinWorld implements World {
       },
       { trigger: 'debounce' },
     );
+  }
+
+  // ---------- 连摸两下，陪着看一会儿 ----------
+
+  /** 摸了桌宠：攒够两下就开一段「陪你一会儿」，之后按节奏递图，不再需要他继续摸。 */
+  private notePets(count: number, now: number): void {
+    this.petSeen = this.petSeenAt > 0 && now - this.petSeenAt <= PET_WINDOW_MS ? this.petSeen + count : count;
+    this.petSeenAt = now;
+    if (this.petSeen < PET_MIN_TOUCHES) return;
+    this.petSeen = 0;
+    this.startCompanion(now);
+  }
+
+  private startCompanion(now: number): void {
+    if (!this.companionEnabled()) return;
+    // 已经在陪了就不再重开计时器：他摸得勤的时候时间不该越拖越长。
+    if (this.companionUntil > now) return;
+    this.companionUntil = now + COMPANION_MS;
+    this.companionNextAt = now;
+    this.companionCount = 0;
+    this.host?.log.info(
+      `checkin: 摸了两下，接下来 ${Math.round(COMPANION_MS / 60_000)} 分钟每 ${Math.round(COMPANION_EVERY_MS / 60_000)} 分钟看一眼`,
+    );
+  }
+
+  /** 陪伴期间按节奏递一眼；时间到就自己停，不用他再管。 */
+  private async tickCompanion(host: WorldHost, now: number): Promise<void> {
+    if (!this.companionUntil) return;
+    if (!this.companionEnabled() || now >= this.companionUntil) {
+      host.log.info(`checkin: 陪伴结束（这趟递了 ${this.companionCount} 眼）`);
+      this.companionUntil = 0;
+      this.companionNextAt = 0;
+      return;
+    }
+    if (now < this.companionNextAt) return;
+    // 先把下一次排好，别因为这一眼失败卡在原地反复重试。
+    this.companionNextAt = now + COMPANION_EVERY_MS;
+    await this.pushCompanion(host, now);
+  }
+
+  private async pushCompanion(host: WorldHost, now: number): Promise<void> {
+    const look = await this.lookSample();
+    if (!look) return;
+    const { sample } = look;
+    const shot = await this.takeShot();
+    this.companionCount += 1;
+    const index = this.companionCount;
+    const total = Math.round(COMPANION_MS / COMPANION_EVERY_MS);
+    const minutesLeft = Math.max(0, Math.round((this.companionUntil - now) / 60_000));
+    const idleMs = sample.idleMs + Math.max(0, now - sample.at);
+    const where =
+      `前台是「${sample.proc || '（不知道）'}」，窗口标题「${briefTitle(sample.title)}」，` +
+      `${idleMs < 60_000 ? '刚刚还在动' : `${Math.round(idleMs / 60_000)} 分钟没动键鼠`}` +
+      `${isWatchingVideo(sample.proc, sample.title) ? '（看着片子）' : ''}。`;
+    const body =
+      '使用者连着摸了你几下（顺着毛摸的那种，摸两下以上），说想让你陪着看一会儿。' +
+      `这是这 ${Math.round(COMPANION_MS / 60_000)} 分钟里的第 ${index}/${total} 眼，还剩约 ${minutesLeft} 分钟。` +
+      (look.selfNow ? '他摸完还没切回原来的窗口，这会儿前台是我自己，所以下面这一眼是摸之前的样子：' : '') +
+      where +
+      (shot ? '截了一张图，你自己看。' : '') +
+      '不用每眼都开口：看到有意思的、他明显在跟你玩、或者他卡在那儿了，再搭一句（气泡，一两行）；其余时候看完就放着。';
+    try {
+      await host.pushEvent(
+        {
+          type: 'checkin.companion',
+          ts: new Date(now).toISOString(),
+          source: this.id,
+          text: body,
+          // 第一眼允许开口打个招呼，后面几眼只是看着，省得五分钟里被催着说五句话。
+          tags: index === 1 ? ['speak'] : [],
+          blobs: shot ? [shot] : undefined,
+          meta: { proc: sample.proc, idleMs, companion: true, index, total, minutesLeft, selfNow: look.selfNow },
+        },
+        { trigger: 'flush' },
+      );
+    } catch (err) {
+      host.log.warn(`checkin: 这一眼没递出去：${msg(err)}`);
+    }
   }
 
   // ---------- 离开 / 回来 ----------
@@ -481,6 +593,9 @@ export class CheckinWorld implements World {
       this.lastEvalAt = now;
       await this.maybeNudge(host, now);
     }
+
+    // 陪伴不看安静时段：是他自己摸出来的，有内容就递。
+    await this.tickCompanion(host, now);
   }
 
   private pushDue(host: WorldHost, thread: Thread, now: number): void {
@@ -650,6 +765,10 @@ export class CheckinWorld implements World {
       watching: this.cfg.watchActivity,
       screenshot: this.cfg.screenshot,
       pokeNudge: this.cfg.pokeNudge,
+      companion: this.companionEnabled(),
+      companionNow: this.companionUntil > now,
+      companionLeft: this.companionUntil > now ? Math.round((this.companionUntil - now) / 60_000) : 0,
+      companionCount: this.companionCount,
       backNudge: this.cfg.backNudge,
       awayMinutes: this.awayMinutes(),
       awaySince: this.awaySince ? new Date(this.awaySince).toISOString() : null,

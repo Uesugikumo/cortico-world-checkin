@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { Language } from 'cortico/core/language.ts';
 import type { BlobInput, ToolDef, World, WorldHost, WorldLamp, WorldWebUiDecl } from 'cortico/core/types.ts';
 import { briefTitle, isSelfApp, isWatchingVideo, sampleForeground, type Sample } from './activity.ts';
-import { checkinConfigGroup, qqTarget, type CheckinConfigSection } from './config.ts';
+import { checkinConfigGroups, qqTarget, type CheckinConfigSection } from './config.ts';
 import { captureScreen } from './shot.ts';
 import { ThreadStore, type Thread } from './store.ts';
 import { text } from './strings.ts';
@@ -214,7 +214,7 @@ export class CheckinWorld implements World {
         },
       ],
       invoke: (panel, method, args) => this.invokePanel(panel, method, args),
-      config: [checkinConfigGroup(language)],
+      config: checkinConfigGroups(language),
       promptDocs: [
         {
           key: 'worlds.checkin.envPrompt',

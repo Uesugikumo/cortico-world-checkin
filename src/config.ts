@@ -82,146 +82,201 @@ export function qqTarget(raw: unknown): string {
   return s;
 }
 
-export function checkinConfigGroup(language: Language): ConfigGroup {
+/** 单位都走 `x-suffix`，标题里就不再写「（分钟）」这类后缀了。 */
+const MINUTE = '分钟';
+const SECOND = '秒';
+const LINE = '条';
+
+/**
+ * 设置页按语义拆成四组（框架把每个 ConfigGroup 渲染成一个独立小节，
+ * 保存也是按组提交，改一组不会牵连另一组）。
+ */
+export function checkinConfigGroups(language: Language): ConfigGroup[] {
   const t = text(language);
-  return {
-    id: 'world:checkin',
-    owner: 'world:checkin',
-    schema: {
-      type: 'object',
-      title: t.configTitle,
-      description: t.configDescription,
-      properties: {
-        'worlds.checkin.watchActivity': {
-          type: 'boolean',
-          title: t.watchTitle,
-          'x-hot': true,
-          description: t.watchDescription,
-        },
-        'worlds.checkin.quietFrom': {
-          type: 'string',
-          title: t.quietFromTitle,
-          'x-hot': true,
-          description: t.quietFromDescription,
-        },
-        'worlds.checkin.quietTo': {
-          type: 'string',
-          title: t.quietToTitle,
-          'x-hot': true,
-          description: t.quietToDescription,
-        },
-        'worlds.checkin.sameAppMinutes': {
-          type: 'integer',
-          title: t.sameAppTitle,
-          minimum: 5,
-          maximum: 480,
-          'x-hot': true,
-          description: t.sameAppDescription,
-        },
-        'worlds.checkin.softGapMinutes': {
-          type: 'integer',
-          title: t.softGapTitle,
-          minimum: 0,
-          maximum: 480,
-          'x-hot': true,
-          description: t.softGapDescription,
-        },
-        'worlds.checkin.softPerHour': {
-          type: 'integer',
-          title: t.softPerHourTitle,
-          minimum: 0,
-          maximum: 12,
-          'x-hot': true,
-          description: t.softPerHourDescription,
-        },
-        'worlds.checkin.softPerDay': {
-          type: 'integer',
-          title: t.softPerDayTitle,
-          minimum: 0,
-          maximum: 24,
-          'x-hot': true,
-          description: t.softPerDayDescription,
-        },
-        'worlds.checkin.sampleSeconds': {
-          type: 'integer',
-          title: t.sampleTitle,
-          minimum: 15,
-          maximum: 3600,
-          'x-hot': true,
-          description: t.sampleDescription,
-        },
-        'worlds.checkin.screenshot': {
-          type: 'boolean',
-          title: t.screenshotTitle,
-          'x-hot': true,
-          description: t.screenshotDescription,
-        },
-        'worlds.checkin.pokeNudge': {
-          type: 'boolean',
-          title: t.pokeTitle,
-          'x-hot': true,
-          description: t.pokeDescription,
-        },
-        'worlds.checkin.companion': {
-          type: 'boolean',
-          title: t.companionTitle,
-          'x-hot': true,
-          description: t.companionDescription,
-        },
-        'worlds.checkin.companionMinutes': {
-          type: 'integer',
-          title: t.companionMinutesTitle,
-          minimum: 1,
-          maximum: 60,
-          'x-hot': true,
-          description: t.companionMinutesDescription,
-        },
-        'worlds.checkin.companionEveryMinutes': {
-          type: 'integer',
-          title: t.companionEveryTitle,
-          minimum: 1,
-          maximum: 30,
-          'x-hot': true,
-          description: t.companionEveryDescription,
-        },
-        'worlds.checkin.awayMinutes': {
-          type: 'integer',
-          title: t.awayTitle,
-          minimum: 1,
-          maximum: 240,
-          'x-hot': true,
-          description: t.awayDescription,
-        },
-        'worlds.checkin.backNudge': {
-          type: 'boolean',
-          title: t.backTitle,
-          'x-hot': true,
-          description: t.backDescription,
-        },
-        'worlds.checkin.staleMinutes': {
-          type: 'integer',
-          title: t.staleTitle,
-          minimum: 5,
-          maximum: 1440,
-          'x-hot': true,
-          description: t.staleDescription,
-        },
-        'worlds.checkin.askAfterMinutes': {
-          type: 'integer',
-          title: t.askTitle,
-          minimum: 0,
-          maximum: 720,
-          'x-hot': true,
-          description: t.askDescription,
-        },
-        'worlds.checkin.qqAskTo': {
-          type: 'string',
-          title: t.askToTitle,
-          'x-hot': true,
-          description: t.askToDescription,
-          placeholder: '123456789',
+  const owner = 'world:checkin' as const;
+  return [
+    {
+      id: 'world:checkin',
+      owner,
+      schema: {
+        type: 'object',
+        title: t.groupTalkTitle,
+        description: t.groupTalkDescription,
+        properties: {
+          'worlds.checkin.watchActivity': {
+            type: 'boolean',
+            title: t.watchTitle,
+            'x-hot': true,
+            description: t.watchDescription,
+          },
+          'worlds.checkin.quietFrom': {
+            type: 'string',
+            title: t.quietFromTitle,
+            'x-hot': true,
+            description: t.quietFromDescription,
+          },
+          'worlds.checkin.quietTo': {
+            type: 'string',
+            title: t.quietToTitle,
+            'x-hot': true,
+            description: t.quietToDescription,
+          },
+          'worlds.checkin.sameAppMinutes': {
+            type: 'integer',
+            title: t.sameAppTitle,
+            minimum: 5,
+            maximum: 480,
+            'x-hot': true,
+            'x-suffix': MINUTE,
+            description: t.sameAppDescription,
+          },
+          'worlds.checkin.softGapMinutes': {
+            type: 'integer',
+            title: t.softGapTitle,
+            minimum: 0,
+            maximum: 480,
+            'x-hot': true,
+            'x-suffix': MINUTE,
+            description: t.softGapDescription,
+          },
+          'worlds.checkin.softPerHour': {
+            type: 'integer',
+            title: t.softPerHourTitle,
+            minimum: 0,
+            maximum: 12,
+            'x-hot': true,
+            'x-suffix': LINE,
+            description: t.softPerHourDescription,
+          },
+          'worlds.checkin.softPerDay': {
+            type: 'integer',
+            title: t.softPerDayTitle,
+            minimum: 0,
+            maximum: 24,
+            'x-hot': true,
+            'x-suffix': LINE,
+            description: t.softPerDayDescription,
+          },
         },
       },
     },
-  };
+    {
+      id: 'world:checkin.pet',
+      owner,
+      schema: {
+        type: 'object',
+        title: t.groupPetTitle,
+        description: t.groupPetDescription,
+        properties: {
+          'worlds.checkin.screenshot': {
+            type: 'boolean',
+            title: t.screenshotTitle,
+            'x-hot': true,
+            description: t.screenshotDescription,
+          },
+          'worlds.checkin.pokeNudge': {
+            type: 'boolean',
+            title: t.pokeTitle,
+            'x-hot': true,
+            description: t.pokeDescription,
+          },
+          'worlds.checkin.companion': {
+            type: 'boolean',
+            title: t.companionTitle,
+            'x-hot': true,
+            description: t.companionDescription,
+          },
+          'worlds.checkin.companionMinutes': {
+            type: 'integer',
+            title: t.companionMinutesTitle,
+            minimum: 1,
+            maximum: 60,
+            'x-hot': true,
+            'x-suffix': MINUTE,
+            description: t.companionMinutesDescription,
+          },
+          'worlds.checkin.companionEveryMinutes': {
+            type: 'integer',
+            title: t.companionEveryTitle,
+            minimum: 1,
+            maximum: 30,
+            'x-hot': true,
+            'x-suffix': MINUTE,
+            description: t.companionEveryDescription,
+          },
+        },
+      },
+    },
+    {
+      id: 'world:checkin.away',
+      owner,
+      schema: {
+        type: 'object',
+        title: t.groupAwayTitle,
+        description: t.groupAwayDescription,
+        properties: {
+          'worlds.checkin.awayMinutes': {
+            type: 'integer',
+            title: t.awayTitle,
+            minimum: 1,
+            maximum: 240,
+            'x-hot': true,
+            'x-suffix': MINUTE,
+            description: t.awayDescription,
+          },
+          'worlds.checkin.backNudge': {
+            type: 'boolean',
+            title: t.backTitle,
+            'x-hot': true,
+            description: t.backDescription,
+          },
+          'worlds.checkin.askAfterMinutes': {
+            type: 'integer',
+            title: t.askTitle,
+            minimum: 0,
+            maximum: 720,
+            'x-hot': true,
+            'x-suffix': MINUTE,
+            description: t.askDescription,
+          },
+          'worlds.checkin.qqAskTo': {
+            type: 'string',
+            title: t.askToTitle,
+            'x-hot': true,
+            description: t.askToDescription,
+            placeholder: '123456789',
+          },
+        },
+      },
+    },
+    {
+      id: 'world:checkin.other',
+      owner,
+      schema: {
+        type: 'object',
+        title: t.groupOtherTitle,
+        description: t.groupOtherDescription,
+        properties: {
+          'worlds.checkin.sampleSeconds': {
+            type: 'integer',
+            title: t.sampleTitle,
+            minimum: 15,
+            maximum: 3600,
+            'x-hot': true,
+            'x-suffix': SECOND,
+            description: t.sampleDescription,
+          },
+          'worlds.checkin.staleMinutes': {
+            type: 'integer',
+            title: t.staleTitle,
+            minimum: 5,
+            maximum: 1440,
+            'x-hot': true,
+            'x-suffix': MINUTE,
+            description: t.staleDescription,
+          },
+        },
+      },
+    },
+  ];
 }

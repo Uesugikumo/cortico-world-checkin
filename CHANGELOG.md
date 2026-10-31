@@ -5,6 +5,7 @@
 - 提示词变量改成点号名：`{{checkin.now}}`、`{{checkin.quiet}}`、`{{checkin.watch}}`、`{{checkin.pending}}`、`{{checkin.limits}}`、`{{checkin.ask}}`。原来叫 `checkin_now` 这一套下划线名，和 `console.pin`、`lite.now`、`qq.self` 这些官方写法不一致；所有 World 的变量是合并进同一个值表的，点号才是命名空间。
 - 老的下划线名**留了一版别名**（`vars.checkin_now = vars['checkin.now']` 等六行），自己改过部署里 `ENV_PROMPT.md` 的人不会因为这次改名渲染出裸 `{{checkin_now}}`。下一个版本再删。
 - 部署副本 `worlds\checkin\ENV_PROMPT.md` 已跟着同步（前缀优先读它，不然线上还是旧占位符）。
+- 提示词文档补上 `vars` 声明（6 个变量各带一句说明）：控制台的提示词页这才知道模板里哪些是占位符，能列出变量、点开看当前值、切「预览变量」看到渲染后的文字；不声明就只有一屏裸 `{{…}}`，还可能漏掉写错的变量名。
 
 ## 0.1.7（2026-10-30 发布）
 

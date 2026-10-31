@@ -162,6 +162,7 @@ export class CheckinWorld implements World {
 
   webUi(language: Language = 'zh'): WorldWebUiDecl {
     const t = text(language);
+    const zh = language === 'zh';
     const lamp: WorldLamp = {
       label: t.lampLabel,
       state: this.host ? 'online' : 'offline',
@@ -195,6 +196,16 @@ export class CheckinWorld implements World {
           description: t.promptDocDescription,
           path: ENV_PROMPT_FILE,
           role: 'envPrompt',
+          // 声明了 vars，控制台的提示词页才会列出变量、能看当前值、能「预览变量」；
+          // 不声明就只有一屏裸 {{…}}。
+          vars: [
+            { name: 'checkin.now', description: zh ? '拼这段前缀时的本地钟点。' : 'Local time when this prefix was assembled.' },
+            { name: 'checkin.quiet', description: zh ? '安静时段；这段时间里它不会主动搭话。' : 'Quiet hours; it never speaks up during this window.' },
+            { name: 'checkin.pending', description: zh ? '还挂着的跟进条数。' : 'How many follow-ups are still open.' },
+            { name: 'checkin.watch', description: zh ? '有没有在观察前台窗口。' : 'Whether foreground windows are being watched.' },
+            { name: 'checkin.limits', description: zh ? '一天/每小时上限、两条之间的最短间隔、同一个程序的门槛。' : 'Daily and hourly caps, the minimum gap, and the per-app threshold.' },
+            { name: 'checkin.ask', description: zh ? '走久了会不会在 QQ 上问一句，以及问给谁。' : 'Whether it asks on QQ when you are away, and who it asks.' },
+          ],
         },
       ],
     };

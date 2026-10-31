@@ -30,6 +30,10 @@ export interface CheckinText {
   pokeDescription: string;
   companionTitle: string;
   companionDescription: string;
+  companionMinutesTitle: string;
+  companionMinutesDescription: string;
+  companionEveryTitle: string;
+  companionEveryDescription: string;
   awayTitle: string;
   awayDescription: string;
   backTitle: string;
@@ -78,7 +82,11 @@ const ZH: CheckinText = {
   pokeDescription: '连着戳它两下（两下要在两三秒内），它就看一眼你正在做什么，再决定要不要说句话。单戳一下不算。',
   companionTitle: '连摸两下就陪着看一会儿',
   companionDescription:
-    '连着摸它两下以上，接下来十分钟里它每两分钟看一眼你的屏幕（带截图，不落盘）。第一眼可以开口打招呼，后面几眼只看不说，除非真有事。摸一下不算。',
+    '连着摸它两下以上，接下来一阵子它隔一会儿就看一眼你的屏幕（带截图，不落盘）。第一眼可以开口打招呼，后面几眼只看不说，除非真有事。摸一下不算。',
+  companionMinutesTitle: '陪着看多久（分钟）',
+  companionMinutesDescription: '连摸两下之后这段陪伴持续多久（1–60）。到点自己停。',
+  companionEveryTitle: '隔多久看一眼（分钟）',
+  companionEveryDescription: '陪伴期间每隔多久递一眼你的屏幕。填得不小于总时长时就只看一眼。',
   awayTitle: '多久不动键鼠算「人不在」（分钟）',
   awayDescription: '键鼠停这么久就算走开了，这段时间不搭话；回来时再开口。看视频的时候按两倍算。',
   backTitle: '离开回来时说一句',
@@ -125,9 +133,13 @@ const EN: CheckinText = {
   screenshotDescription: 'Captures the foreground window as a JPEG (about 1280 wide, no file kept) so the model can see it. Skipped when the current model cannot read images.',
   pokeTitle: 'Double-poke the pet to speak up',
   pokeDescription: 'Poke it twice within a couple of seconds and it will take a look at what you are doing, then decide whether to say a line. A single poke does nothing.',
-  companionTitle: 'Two pets for a ten-minute look-along',
+  companionTitle: 'Two pets and it looks along',
   companionDescription:
-    'Pet it twice or more and, for the next ten minutes, it takes a look at your screen every two minutes (with a screenshot, never written to disk). The first look may greet you; the rest just watch, unless something is really worth a line. One pet does nothing.',
+    'Pet it twice or more and, for a while, it glances at your screen now and then (with a screenshot, never written to disk). The first look may greet you; the rest just watch, unless something is really worth a line. One pet does nothing.',
+  companionMinutesTitle: 'Look along for (minutes)',
+  companionMinutesDescription: 'How long the company after two pets lasts (1-60). It stops by itself at the end.',
+  companionEveryTitle: 'A glance every (minutes)',
+  companionEveryDescription: 'How often a glance arrives while looking along. If it is not shorter than the total, you only get one look.',
   awayTitle: 'Away after (minutes without input)',
   awayDescription: 'This long without keyboard or mouse counts as away: it stays quiet, and says hello when you come back. Doubled while a video is playing.',
   backTitle: 'Greet me when I am back',

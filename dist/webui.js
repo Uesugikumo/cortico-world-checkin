@@ -90,9 +90,12 @@ function mountProbe(ctx) {
     else { shotPill.textContent = '开（没确认）'; shotPill.className = 'pill plain'; }
     if (st.pokeNudge === false) { pokePill.textContent = '关着'; pokePill.className = 'pill off'; }
     else { pokePill.textContent = '连戳两下就说话'; pokePill.className = 'pill on'; }
+    const every = Number.isFinite(st.companionEveryMinutes) ? st.companionEveryMinutes : 2;
+    const span = Number.isFinite(st.companionMinutes) ? st.companionMinutes : 10;
+    const eyes = Number.isFinite(st.companionTotal) ? st.companionTotal : 5;
     if (st.companion === false) { companionPill.textContent = '关着'; companionPill.className = 'pill off'; }
     else if (st.companionNow) { companionPill.textContent = `陪着呢 · 还剩 ${st.companionLeft ?? 0} 分钟`; companionPill.className = 'pill on'; }
-    else { companionPill.textContent = '摸两下陪着看 10 分钟'; companionPill.className = 'pill on'; }
+    else { companionPill.textContent = `摸两下陪着看 ${span} 分钟（每 ${every} 分钟一眼，共 ${eyes} 眼）`; companionPill.className = 'pill on'; }
     const away = Number.isFinite(st.awayMinutes) ? st.awayMinutes : 15;
     awayText.textContent = `${away} 分钟没动键鼠算离开 · 回来${st.backNudge === false ? '不说' : '说一句'}`;
     if (st.awaySince) { backPill.textContent = '人不在'; backPill.className = 'pill off'; }

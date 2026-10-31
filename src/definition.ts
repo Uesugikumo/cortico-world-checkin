@@ -80,7 +80,7 @@ export const CHECKIN: WorldDefinition<CheckinConfigSection> = {
         type: 'checkin.companion',
         tags: [],
         description:
-          '他连着摸了你两下以上，接下来十分钟每两分钟递一眼他的屏幕（带截图）。第一眼带 speak，后面几眼只是看着，不必每眼都开口。',
+          '他连着摸了你两下以上，接下来按设置陪一阵（默认十分钟、每两分钟一眼）递他的屏幕（带截图）。第一眼带 speak，后面几眼只是看着，不必每眼都开口。',
       },
     ],
   },

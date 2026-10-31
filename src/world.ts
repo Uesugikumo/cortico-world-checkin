@@ -35,10 +35,10 @@ const POKE_MIN_GAP_MS = 20_000;
 const PET_WINDOW_MS = 3_500;
 /** 摸几下才算数（一下是随手撸一把） */
 const PET_MIN_TOUCHES = 2;
-/** 这一趟陪着看多久 */
-const COMPANION_MS = 10 * 60_000;
-/** 陪着看的时候，隔这么久递一眼 */
-const COMPANION_EVERY_MS = 2 * 60_000;
+/** 这一趟陪着看多久（默认值；设置里能改） */
+const COMPANION_MIN = 10;
+/** 陪着看的时候，隔多久递一眼（默认值；设置里能改） */
+const COMPANION_EVERY_MIN = 2;
 /** 两次「回来啦」之间至少隔多久（防止出门倒垃圾来回三次都被招呼） */
 const BACK_MIN_GAP_MS = 30 * 60_000;
 /** 离开超过这么久就不细说了（多半是睡了一觉/合盖） */
@@ -167,6 +167,9 @@ export class CheckinWorld implements World {
       'checkin.ask': ask
         ? `他离开超过 ${this.askAfterMinutes()} 分钟还没回来，会把 QQ 目标（${ask}）递给你。`
         : '他走久了不会走 QQ，只在桌面上等你回来。',
+      'checkin.companion': this.companionEnabled()
+        ? `陪着看 ${this.companionMinutes()} 分钟，每 ${Math.round(this.companionEveryMs() / 60_000)} 分钟递一眼（一共 ${this.companionTotal()} 眼，第一眼带 speak）`
+        : '连着摸你两下已经关掉了，收不到这种陪伴',
     };
     // 0.1.7 及以前用的是下划线名；留一版别名，别人改过自己的 ENV_PROMPT 也不会渲染出裸的 {{…}}。
     vars.checkin_now = vars['checkin.now'];
@@ -175,6 +178,7 @@ export class CheckinWorld implements World {
     vars.checkin_watch = vars['checkin.watch'];
     vars.checkin_limits = vars['checkin.limits'];
     vars.checkin_ask = vars['checkin.ask'];
+    vars.checkin_companion = vars['checkin.companion'];
     return vars;
   }
 
@@ -227,6 +231,7 @@ export class CheckinWorld implements World {
             { name: 'checkin.watch', description: zh ? '有没有在观察前台窗口。' : 'Whether foreground windows are being watched.' },
             { name: 'checkin.limits', description: zh ? '一天/每小时上限、两条之间的最短间隔、同一个程序的门槛。' : 'Daily and hourly caps, the minimum gap, and the per-app threshold.' },
             { name: 'checkin.ask', description: zh ? '走久了会不会在 QQ 上问一句，以及问给谁。' : 'Whether it asks on QQ when you are away, and who it asks.' },
+            { name: 'checkin.companion', description: zh ? '连摸两下之后陪多久、隔多久递一眼、一共几眼。' : 'How long the post-pet company lasts, how often a glance arrives, and how many glances in total.' },
           ],
         },
       ],
@@ -368,6 +373,24 @@ export class CheckinWorld implements World {
 
   // ---------- 连摸两下，陪着看一会儿 ----------
 
+  /** 陪多久（分钟）：设置里能改，夹在 1–60。 */
+  private companionMinutes(): number {
+    const n = Math.round(Number(this.cfg.companionMinutes));
+    return Number.isFinite(n) && n >= 1 ? Math.min(60, n) : COMPANION_MIN;
+  }
+
+  /** 隔多久递一眼（毫秒）：夹在 30 秒–30 分钟，并且不会超过总时长。 */
+  private companionEveryMs(): number {
+    const n = Math.round(Number(this.cfg.companionEveryMinutes) * 60_000);
+    const every = Number.isFinite(n) && n >= 30_000 ? Math.min(30 * 60_000, n) : COMPANION_EVERY_MIN * 60_000;
+    return Math.min(every, this.companionMinutes() * 60_000);
+  }
+
+  /** 这一趟一共递几眼。 */
+  private companionTotal(): number {
+    return Math.max(1, Math.round((this.companionMinutes() * 60_000) / this.companionEveryMs()));
+  }
+
   /** 摸了桌宠：攒够两下就开一段「陪你一会儿」，之后按节奏递图，不再需要他继续摸。 */
   private notePets(count: number, now: number): void {
     this.petSeen = this.petSeenAt > 0 && now - this.petSeenAt <= PET_WINDOW_MS ? this.petSeen + count : count;
@@ -381,11 +404,12 @@ export class CheckinWorld implements World {
     if (!this.companionEnabled()) return;
     // 已经在陪了就不再重开计时器：他摸得勤的时候时间不该越拖越长。
     if (this.companionUntil > now) return;
-    this.companionUntil = now + COMPANION_MS;
+    const minutes = this.companionMinutes();
+    this.companionUntil = now + minutes * 60_000;
     this.companionNextAt = now;
     this.companionCount = 0;
     this.host?.log.info(
-      `checkin: 摸了两下，接下来 ${Math.round(COMPANION_MS / 60_000)} 分钟每 ${Math.round(COMPANION_EVERY_MS / 60_000)} 分钟看一眼`,
+      `checkin: 摸了两下，接下来 ${minutes} 分钟每 ${Math.round(this.companionEveryMs() / 60_000)} 分钟看一眼（共 ${this.companionTotal()} 眼）`,
     );
   }
 
@@ -400,7 +424,7 @@ export class CheckinWorld implements World {
     }
     if (now < this.companionNextAt) return;
     // 先把下一次排好，别因为这一眼失败卡在原地反复重试。
-    this.companionNextAt = now + COMPANION_EVERY_MS;
+    this.companionNextAt = now + this.companionEveryMs();
     await this.pushCompanion(host, now);
   }
 
@@ -411,7 +435,8 @@ export class CheckinWorld implements World {
     const shot = await this.takeShot();
     this.companionCount += 1;
     const index = this.companionCount;
-    const total = Math.round(COMPANION_MS / COMPANION_EVERY_MS);
+    const minutes = this.companionMinutes();
+    const total = this.companionTotal();
     const minutesLeft = Math.max(0, Math.round((this.companionUntil - now) / 60_000));
     const idleMs = sample.idleMs + Math.max(0, now - sample.at);
     const where =
@@ -420,7 +445,7 @@ export class CheckinWorld implements World {
       `${isWatchingVideo(sample.proc, sample.title) ? '（看着片子）' : ''}。`;
     const body =
       '使用者连着摸了你几下（顺着毛摸的那种，摸两下以上），说想让你陪着看一会儿。' +
-      `这是这 ${Math.round(COMPANION_MS / 60_000)} 分钟里的第 ${index}/${total} 眼，还剩约 ${minutesLeft} 分钟。` +
+      `这是这 ${minutes} 分钟里的第 ${index}/${total} 眼，还剩约 ${minutesLeft} 分钟。` +
       (look.selfNow ? '他摸完还没切回原来的窗口，这会儿前台是我自己，所以下面这一眼是摸之前的样子：' : '') +
       where +
       (shot ? '截了一张图，你自己看。' : '') +
@@ -766,6 +791,9 @@ export class CheckinWorld implements World {
       screenshot: this.cfg.screenshot,
       pokeNudge: this.cfg.pokeNudge,
       companion: this.companionEnabled(),
+      companionMinutes: this.companionMinutes(),
+      companionEveryMinutes: Math.round(this.companionEveryMs() / 60_000),
+      companionTotal: this.companionTotal(),
       companionNow: this.companionUntil > now,
       companionLeft: this.companionUntil > now ? Math.round((this.companionUntil - now) / 60_000) : 0,
       companionCount: this.companionCount,

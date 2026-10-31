@@ -27,8 +27,12 @@ export const CHECKIN_DEFAULTS = {
   screenshot: true,
   /** 连戳两下桌宠就去看一眼、并且允许开口 */
   pokeNudge: true,
-  /** 连摸两下桌宠就陪着看十分钟（每两分钟递一张截图） */
+  /** 连摸两下桌宠就陪着看一阵（下面两个数决定多久、多密） */
   companion: true,
+  /** 陪着看多久（分钟） */
+  companionMinutes: 10,
+  /** 陪着看的时候隔多久递一眼（分钟） */
+  companionEveryMinutes: 2,
   /** 键鼠停了多久算「人不在」（分钟） */
   awayMinutes: 15,
   /** 人回来的时候说一句「你回来啦」 */
@@ -55,6 +59,8 @@ export interface CheckinConfigSection {
   screenshot: boolean;
   pokeNudge: boolean;
   companion: boolean;
+  companionMinutes: number;
+  companionEveryMinutes: number;
   awayMinutes: number;
   backNudge: boolean;
   staleMinutes: number;
@@ -161,6 +167,22 @@ export function checkinConfigGroup(language: Language): ConfigGroup {
           title: t.companionTitle,
           'x-hot': true,
           description: t.companionDescription,
+        },
+        'worlds.checkin.companionMinutes': {
+          type: 'integer',
+          title: t.companionMinutesTitle,
+          minimum: 1,
+          maximum: 60,
+          'x-hot': true,
+          description: t.companionMinutesDescription,
+        },
+        'worlds.checkin.companionEveryMinutes': {
+          type: 'integer',
+          title: t.companionEveryTitle,
+          minimum: 1,
+          maximum: 30,
+          'x-hot': true,
+          description: t.companionEveryDescription,
         },
         'worlds.checkin.awayMinutes': {
           type: 'integer',

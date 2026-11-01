@@ -154,7 +154,11 @@ export class CheckinWorld implements World {
         lim.gap > 0 ? `两条之间至少隔 ${lim.gap} 分钟` : '两条之间不设间隔',
         `同一个程序得先连续待满 ${lim.sameApp} 分钟`,
       ].join('、'),
-      'checkin.away': '他离开一阵还没回来时会给你一个由头；想在 QQ 上问一句，就自己去 QQ 那边的工具里找会话，不想找就先等着。',
+      'checkin.away':
+        `键鼠有 ${this.awayMinutes()} 分钟没动就算 TA 离开了（看视频时放宽到 ${this.awayMinutes() * 2} 分钟）。` +
+        '走久了还没回来，系统会给你一个由头；想在 QQ 上问一句，就自己去 QQ 那边的工具里找会话，不想找就先等着。',
+      'checkin.stale': `${Math.round(this.staleAskedMs() / 60_000)} 分钟`,
+      'checkin.backGap': `${Math.round(BACK_MIN_GAP_MS / 60_000)} 分钟`,
       'checkin.companion': this.companionEnabled()
         ? `陪着看 ${this.companionMinutes()} 分钟，每 ${Math.round(this.companionEveryMs() / 60_000)} 分钟递一眼（一共 ${this.companionTotal()} 眼，第一眼带 speak）`
         : '连着摸你两下已经关掉了，收不到这种陪伴',
@@ -168,6 +172,8 @@ export class CheckinWorld implements World {
     vars.checkin_limits = vars['checkin.limits'];
     vars.checkin_away = vars['checkin.away'];
     vars.checkin_companion = vars['checkin.companion'];
+    vars.checkin_stale = vars['checkin.stale'];
+    vars.checkin_backGap = vars['checkin.backGap'];
     return vars;
   }
 
@@ -219,7 +225,9 @@ export class CheckinWorld implements World {
             { name: 'checkin.pending', description: zh ? '还挂着的跟进条数。' : 'How many follow-ups are still open.' },
             { name: 'checkin.watch', description: zh ? '有没有在观察前台窗口。' : 'Whether foreground windows are being watched.' },
             { name: 'checkin.limits', description: zh ? '一天/每小时上限、两条之间的最短间隔、同一个程序的门槛。' : 'Daily and hourly caps, the minimum gap, and the per-app threshold.' },
-            { name: 'checkin.away', description: zh ? '他走久了会给一个由头；要不要在 QQ 上问、问给谁，交给模型自己找。' : 'A cue arrives when you have been away for a while; whether to ask on QQ and who to ask is up to the model.' },
+            { name: 'checkin.away', description: zh ? '离开的判定（分钟，看视频放宽一倍）和走久了递由头的口径；要不要在 QQ 上问、问给谁，交给模型自己找。' : 'How absence is judged (doubled while watching video) and what the cue says; whether to ask on QQ and who to ask is up to the model.' },
+            { name: 'checkin.stale', description: zh ? '提醒过一次、一直没有结果的跟进，过多少分钟自动销账。' : 'How long an asked, still unanswered follow-up stays before it is swept.' },
+            { name: 'checkin.backGap', description: zh ? '两次「回来时说一句」之间至少隔多久。' : 'Minimum gap between two welcome-back lines.' },
             { name: 'checkin.companion', description: zh ? '连摸两下之后陪多久、隔多久递一眼、一共几眼。' : 'How long the post-pet company lasts, how often a glance arrives, and how many glances in total.' },
           ],
         },

@@ -31,11 +31,11 @@ function mountProbe(ctx) {
   const message = ui.msgline('');
 
   sheet.body.append(
+    ui.field('监测', watchPill),
+    ui.field('采样间隔', intervalText),
     ui.field('搭话时截图', shotPill),
     ui.field('连戳两下桌宠', pokePill),
     ui.field('连摸两下桌宠', companionPill),
-    ui.field('监测', watchPill),
-    ui.field('采样间隔', intervalText),
     ui.field('今天已说', rateText),
     ui.field('离开判定 / 回来问候', awayText),
     ui.field('现在', backPill),

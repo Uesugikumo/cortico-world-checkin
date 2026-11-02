@@ -419,7 +419,7 @@ export class CheckinWorld implements World {
       eye +
       (streak > 0 ? `同一件事已经连着 ${streak} 分钟了。` : '') +
       (shot ? '截了一张图，你自己看。' : '') +
-      '他连戳两下多半是想听你说句话（也可能只是手欠）；有想说的就说一句，一两行。要是不想接，就当没这回事。';
+      '他连戳两下多半是想听你说句话（也可能只是手欠）；说一句，一两行。';
     await host.pushEvent(
       {
         type: 'checkin.activity',
@@ -780,7 +780,7 @@ export class CheckinWorld implements World {
     if (!this.store.markAsked(thread.id, now)) return;
     const body =
       `我自己记着的一件事到点了：${thread.text}。现在 ${this.clockText(now)}。` +
-      '要问就现在问一句，不想问就让它过去。';
+      '要问就现在问一句。';
     void host
       .pushEvent(
         {
@@ -841,7 +841,7 @@ export class CheckinWorld implements World {
       `（窗口标题：${briefTitle(current.title)}）。最近一小时：${this.recentSummary(now)}。` +
       focusNote +
       (shot ? '顺手截了一张图，你自己看。' : '') +
-      '要是这会儿有句短的想说，就说出来（气泡，一两行）；说完回去接着干你的。真没话说再沉默。';
+      '要是这会儿有句短的想说，就说出来（气泡，一两行）；说完回去接着干你的。';
 
     this.store.rollDay(day);
     this.store.markSoft(day, now, ignored);

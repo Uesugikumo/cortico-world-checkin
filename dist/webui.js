@@ -23,6 +23,7 @@ function mountProbe(ctx) {
   const intervalText = ui.h('span', 'mono', '—');
   const rateText = ui.h('span', 'mono', '—');
   const awayText = ui.h('span', 'mono', '—');
+  const skipText = ui.h('span', 'mono', '—');
   const backPill = ui.pill('—', 'plain');
   const procText = ui.h('span', 'mono', '—');
   const titleText = ui.h('span', 'mono', '—');
@@ -39,6 +40,7 @@ function mountProbe(ctx) {
     ui.field('连戳两下桌宠', pokePill),
     ui.field('连摸两下桌宠', companionPill),
     ui.field('今天已说', rateText),
+    ui.field('键鼠不动就不给', skipText),
     ui.field('离开判定 / 回来问候', awayText),
     ui.field('现在', backPill),
     ui.section('当前采集到的信息'),
@@ -102,6 +104,10 @@ function mountProbe(ctx) {
     else if (st.companionNow) { companionPill.textContent = `陪着呢 · 还剩 ${st.companionLeft ?? 0} 分钟`; companionPill.className = 'pill on'; }
     else { companionPill.textContent = `摸两下陪着看 ${span} 分钟（每 ${every} 分钟一眼，共 ${eyes} 眼）`; companionPill.className = 'pill on'; }
     const away = Number.isFinite(st.awayMinutes) ? st.awayMinutes : 15;
+    const skipMin = Number.isFinite(st.idleSkipMinutes) ? st.idleSkipMinutes : 5;
+    skipText.textContent = skipMin > 0
+      ? `键鼠停超过 ${skipMin} 分钟就不递（看片放宽到 ${skipMin * 2} 分钟）`
+      : '不判空闲，只看离开判定';
     // 这趟离开的「落账」状态只在人不在的时候有意义
     const needBy = Number.isFinite(st.awayVerdictMinutes) ? st.awayVerdictMinutes : away;
     const verdict = !st.awaySince ? '' : st.awayVerdictNoted ? ' · 这趟已落账'

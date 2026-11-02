@@ -23,6 +23,11 @@ const IGNORED_MAX = 3;
 const GAP_FALLBACK_MIN = 5;
 /** 「隔多久看一眼屏幕」的上限（分钟） */
 const LOOK_MAX_MIN = 720;
+/** 「隔多久看一眼屏幕」的默认值：老配置里没有这个键时用 */
+const LOOK_DEFAULT_MIN = 30;
+/** 「键鼠停多久就不给由头」的上限与默认（分钟） */
+const IDLE_SKIP_MAX_MIN = 240;
+const IDLE_SKIP_DEFAULT_MIN = 5;
 /** 挂着的跟进最多几条 */
 const MAX_PENDING = 20;
 /** 用户真的说话了的标记 */
@@ -154,9 +159,13 @@ export class CheckinWorld implements World {
     };
   }
 
-  /** 「隔多久看一眼屏幕」的分钟数：0 = 关掉这种由头，上限 12 小时。 */
+  /**
+   * 「隔多久看一眼屏幕」的分钟数：0 = 关掉这种由头，上限 12 小时。
+   * 老配置里没有这个键（`defaults()` 只补整个缺失的 world），别把它当成「用户填了 0」。
+   */
   private lookEveryMinutes(): number {
-    const n = Math.round(Number(this.cfg.lookEveryMinutes));
+    const raw = this.cfg.lookEveryMinutes;
+    const n = raw === undefined || raw === null ? LOOK_DEFAULT_MIN : Math.round(Number(raw));
     if (!Number.isFinite(n) || n <= 0) return 0;
     return Math.min(LOOK_MAX_MIN, n);
   }
@@ -177,6 +186,9 @@ export class CheckinWorld implements World {
         lim.perHour > 0 ? `每小时最多 ${lim.perHour} 条` : '每小时不限',
         lim.gap > 0 ? `两条之间至少隔 ${lim.gap} 分钟` : `两条之间不设间隔，被无视时按 ${GAP_FALLBACK_MIN} 分钟的基数退避`,
         `同一个程序得先连续待满 ${lim.sameApp} 分钟`,
+        this.idleSkipMinutes() > 0
+          ? `键鼠停着超过 ${this.idleSkipMinutes()} 分钟就不算盯着屏幕了，不给由头（看片放宽到 ${this.idleSkipMinutes() * 2} 分钟）`
+          : '键鼠停着也算盯着屏幕（不判空闲）',
       ].join('、'),
       'checkin.away':
         `键鼠有 ${this.awayMinutes()} 分钟没动就算 TA 离开了（看视频时放宽到 ${this.awayMinutes() * 2} 分钟）。` +
@@ -508,9 +520,28 @@ export class CheckinWorld implements World {
     return Math.max(1, Math.min(240, Math.round(Number(this.cfg.awayMinutes) || 15)));
   }
 
+  /** 配置里的「键鼠停多久就不给由头」，0 = 不判；夹在 0–240 分钟。没这个键的老配置按默认 5 分钟。 */
+  private idleSkipMinutes(): number {
+    const raw = this.cfg.idleSkipMinutes;
+    const n = raw === undefined || raw === null ? IDLE_SKIP_DEFAULT_MIN : Math.round(Number(raw));
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(IDLE_SKIP_MAX_MIN, n);
+  }
+
   /** 这次算「人不在」的 idle 阈值；看片时放宽一倍（捏着手柄不碰键鼠是常态）。 */
   private awayThreshold(sample: Sample): number {
     const base = this.awayMinutes() * 60_000;
+    return isWatchingVideo(sample.proc, sample.title) ? base * 2 : base;
+  }
+
+  /**
+   * 人还在这台电脑前、但键鼠停了一会儿——这时候递由头等于对着空椅子说话
+   * （正文会写「键鼠有 N 分钟没动」，模型也读不出那是「在发呆」还是「刚走」）。
+   * 0 = 不判，仍然只看「离开判定」。看片时同样放宽一倍。
+   */
+  private idleSkipMs(sample: Sample): number {
+    const base = this.idleSkipMinutes() * 60_000;
+    if (!base) return 0;
     return isWatchingVideo(sample.proc, sample.title) ? base * 2 : base;
   }
 
@@ -739,6 +770,9 @@ export class CheckinWorld implements World {
     const idleNow = current.idleMs + Math.max(0, now - current.at);
     const away = this.awayThreshold(current);
     if (idleNow > away) return;
+    // 还在电脑前，但键鼠停了一阵子：照样别推（人可能正发呆/在别处）
+    const skip = this.idleSkipMs(current);
+    if (skip > 0 && idleNow > skip) return;
 
     const streak = this.continuousMinutes();
     const lim = this.limits();
@@ -804,6 +838,8 @@ export class CheckinWorld implements World {
     // 人不在，看了也白看
     const idleNow = current.idleMs + Math.max(0, now - current.at);
     if (idleNow > this.awayThreshold(current)) return;
+    const skip = this.idleSkipMs(current);
+    if (skip > 0 && idleNow > skip) return;
 
     const prev = this.lastLookAt;
     this.lastLookAt = now;
@@ -953,6 +989,7 @@ export class CheckinWorld implements World {
       lookDueIn: this.lookEveryMinutes() > 0 && this.lastLookAt
         ? Math.max(0, Math.round((this.lastLookAt + this.lookEveryMinutes() * 60_000 - now) / 60_000))
         : 0,
+      idleSkipMinutes: this.idleSkipMinutes(),
       limits: lim,
       saidToday: soft.day === this.dayKey(now) ? soft.count : 0,
       saidLastHour: this.store.countSince(now, 60 * 60_000),

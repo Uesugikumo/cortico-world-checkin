@@ -95,7 +95,12 @@ function mountProbe(ctx) {
     else if (st.companionNow) { companionPill.textContent = `陪着呢 · 还剩 ${st.companionLeft ?? 0} 分钟`; companionPill.className = 'pill on'; }
     else { companionPill.textContent = `摸两下陪着看 ${span} 分钟（每 ${every} 分钟一眼，共 ${eyes} 眼）`; companionPill.className = 'pill on'; }
     const away = Number.isFinite(st.awayMinutes) ? st.awayMinutes : 15;
-    awayText.textContent = `${away} 分钟没动键鼠算离开 · 回来${st.backNudge === false ? '不说' : '说一句'}`;
+    // 这趟离开的「落账」状态只在人不在的时候有意义
+    const needBy = Number.isFinite(st.awayVerdictMinutes) ? st.awayVerdictMinutes : away;
+    const verdict = !st.awaySince ? '' : st.awayVerdictNoted ? ' · 这趟已落账'
+      : st.awayVerdict === 'nagged' ? ' · 补过收尾，仍未落账'
+        : ` · 还没落账（${needBy} 分钟后补一次）`;
+    awayText.textContent = `${away} 分钟没动键鼠算离开 · 回来${st.backNudge === false ? '不说' : '说一句'}${verdict}`;
     if (st.awaySince) { backPill.textContent = '人不在'; backPill.className = 'pill off'; }
     else { backPill.textContent = '在'; backPill.className = 'pill on'; }
   }

@@ -45,6 +45,11 @@ const BACK_MIN_GAP_MS = 30 * 60_000;
 const BACK_LONG_MS = 8 * 60 * 60_000;
 /** 一条跟进提醒过一次之后，最多再留这么久（用户要的「问完就自己清掉」） */
 const STALE_UNASKED_MS = 3 * 24 * 60 * 60_000;
+/**
+ * 递出「他走久了」之后过多久还没落账，就补一条「只记账、别开口」的收尾。
+ * 这个时长直接跟「多久不动算离开」用同一个数（见 awayVerdictMs），
+ * 只补一次：不打扰用户是底线，逼模型给出结论只需要一次机会。
+ */
 
 /** 一次「看一眼」的结果：可能是刚采的，也可能是拿上一次的样本兜底。 */
 interface Look {
@@ -95,6 +100,12 @@ export class CheckinWorld implements World {
   private lastBackAt = 0;
   /** 这一趟「人不在」有没有递过「他走久了」的由头（回来就复位）。 */
   private awayAsked = false;
+  /** 这一趟离开的第一条推出去的时刻；null 表示没有待落账的由头。 */
+  private awayAt: number | null = null;
+  /** 最近一次 checkin_note 的时刻（用来判断这趟离开有没有留下结论）。 */
+  private lastNoteAt = 0;
+  /** 收尾提醒只补一次，补过就置为 Infinity 的等价值（用 awayNagged 记）。 */
+  private awayNagged = false;
 
   constructor(deps: Deps) {
     this.deps = deps;
@@ -156,9 +167,11 @@ export class CheckinWorld implements World {
       ].join('、'),
       'checkin.away':
         `键鼠有 ${this.awayMinutes()} 分钟没动就算 TA 离开了（看视频时放宽到 ${this.awayMinutes() * 2} 分钟）。` +
-        '走久了还没回来，系统会给你一个由头；想在 QQ 上问一句，就自己去 QQ 那边的工具里找会话，不想找就先等着。',
+        '走久了还没回来，系统会给你一个由头；想在 QQ 上问一句，就自己去 QQ 那边的工具里找会话，不想找就先等着。' +
+        `递给你之后再过 ${this.awayMinutes()} 分钟还没用 checkin_note 落账，会补一条只让你记账、不许开口的收尾（只补一次）。`,
       'checkin.stale': `${Math.round(this.staleAskedMs() / 60_000)} 分钟`,
       'checkin.backGap': `${Math.round(BACK_MIN_GAP_MS / 60_000)} 分钟`,
+      'checkin.awayVerdict': `${Math.round(this.awayVerdictMs() / 60_000)} 分钟`,
       'checkin.companion': this.companionEnabled()
         ? `陪着看 ${this.companionMinutes()} 分钟，每 ${Math.round(this.companionEveryMs() / 60_000)} 分钟递一眼（一共 ${this.companionTotal()} 眼，第一眼带 speak）`
         : '连着摸你两下已经关掉了，收不到这种陪伴',
@@ -174,6 +187,7 @@ export class CheckinWorld implements World {
     vars.checkin_companion = vars['checkin.companion'];
     vars.checkin_stale = vars['checkin.stale'];
     vars.checkin_backGap = vars['checkin.backGap'];
+    vars.checkin_awayVerdict = vars['checkin.awayVerdict'];
     return vars;
   }
 
@@ -228,6 +242,7 @@ export class CheckinWorld implements World {
             { name: 'checkin.away', description: zh ? '离开的判定（分钟，看视频放宽一倍）和走久了递由头的口径；要不要在 QQ 上问、问给谁，交给模型自己找。' : 'How absence is judged (doubled while watching video) and what the cue says; whether to ask on QQ and who to ask is up to the model.' },
             { name: 'checkin.stale', description: zh ? '提醒过一次、一直没有结果的跟进，过多少分钟自动销账。' : 'How long an asked, still unanswered follow-up stays before it is swept.' },
             { name: 'checkin.backGap', description: zh ? '两次「回来时说一句」之间至少隔多久。' : 'Minimum gap between two welcome-back lines.' },
+            { name: 'checkin.awayVerdict', description: zh ? '递出「他走久了」之后，等多久还没落账就补一条只记账、不许开口的收尾（只补一次）。' : 'After the away cue, how long to wait for a recorded verdict before sending one record-only nudge (once only).' },
             { name: 'checkin.companion', description: zh ? '连摸两下之后陪多久、隔多久递一眼、一共几眼。' : 'How long the post-pet company lasts, how often a glance arrives, and how many glances in total.' },
           ],
         },
@@ -480,6 +495,15 @@ export class CheckinWorld implements World {
   }
 
   /**
+   * 递出「他走久了」之后，等多久还没落账就补一条收尾。
+   * 直接跟「多久不动算离开」用同一个数——就是提示词里 {{checkin.away}} 那个数，
+   * 不额外加配置项（用户 m08100 的意思：R 就取这个变量的值）。
+   */
+  private awayVerdictMs(): number {
+    return this.awayMinutes() * 60_000;
+  }
+
+  /**
    * 用一个采样判断走没走、回没回。采样间隔就是这套判定的计时精度：
    * 一分钟采一次的话，离开和回来各可能差一分钟，所以文案里写「大约」。
    */
@@ -494,6 +518,8 @@ export class CheckinWorld implements World {
     const awayMs = now - this.awaySince;
     this.awaySince = null;
     this.awayAsked = false;
+    this.awayAt = null;
+    this.awayNagged = false;
     if (awayMs < threshold) return;
     if (!this.cfg.backNudge) return;
     if (this.inQuiet(now)) return;
@@ -516,6 +542,8 @@ export class CheckinWorld implements World {
     if (awayMs < this.awayThreshold(sample)) return;
     if (this.inQuiet(now)) return;
     this.awayAsked = true;
+    this.awayAt = now;
+    this.awayNagged = false;
     const minutes = Math.round(awayMs / 60_000);
     const spent = awayMs >= BACK_LONG_MS ? `大约 ${Math.round(minutes / 60)} 小时` : `大约 ${minutes} 分钟`;
     // 这时候屏幕上多半是锁屏，截了也没用，还白费 token，所以不带图。
@@ -529,8 +557,9 @@ export class CheckinWorld implements World {
       '等他回来再顺口说一句「下课啦」就够。\n' +
       '真的一点线索都没有、又确实想问问，就自己看一眼工具列表里有没有能把话送到手机上的东西（QQ 那边的发送工具、' +
       '别的通知渠道都算；名字别猜，没有就是没装）；有的话优先发给他本人，别往群里发。一两句话，别追问、别连着发第二条。\n' +
-      '问完把这件事记进待跟进（checkin_note，比如「他说出去一趟，回来问问顺不顺利」），' +
-      '这样等他回话或者人回来了，你手里有账可对。找不到工具、或者拿不准该发给谁，就什么都不做，等着。';
+      '不管最后决定问不问，这一步都要收尾：用 `checkin_note` 把你的结论记一条。问了他就记「等他回」；' +
+      '判断不用问就记「大概在上课/在忙，不用管他」——**决定不打扰，也要写下来**，什么都不留不算处理完。' +
+      '记了我就不再来问你这趟的事了。';
     try {
       await host.pushEvent(
         {
@@ -546,6 +575,43 @@ export class CheckinWorld implements World {
     } catch (err) {
       this.awayAsked = false;
       host.log.warn(`checkin: 离开的由头没递出去：${msg(err)}`);
+    }
+  }
+
+  /**
+   * 这趟离开还没落账（没调 checkin_note）就补一条：
+   * 只让模型记结论、明确不许开口——逼出结论一次，但拿用户当提醒对象的事只做一次。
+   */
+  private async nagAwayVerdict(now: number): Promise<void> {
+    const host = this.host;
+    if (!host) return;
+    if (this.awayAt === null || this.awayNagged) return;
+    if (this.awaySince === null) return;
+    if (now - this.awayAt < this.awayVerdictMs()) return;
+    if (this.lastNoteAt >= this.awayAt) return;
+    if (this.inQuiet(now)) return;
+    this.awayNagged = true;
+    const minutes = Math.round((now - this.awaySince) / 60_000);
+    const body =
+      `使用者已经离开 ${minutes} 分钟了，上一趟你还没有收尾。` +
+      '**这条不要开口，也不要给 TA 发任何消息**，只做一件事：用 `checkin_note` 写下你的结论。' +
+      '问过了就记「等他回」；判断不用问就记「大概在上课/在忙，不用管他」——决定不打扰也是结论。' +
+      '记完这趟就算完了，我不会再问你。';
+    try {
+      await host.pushEvent(
+        {
+          type: 'checkin.away',
+          ts: new Date(now).toISOString(),
+          source: this.id,
+          text: body,
+          tags: [],
+          meta: { awayMinutes: minutes, back: false, verdict: 'reminder' },
+        },
+        { trigger: 'flush' },
+      );
+    } catch (err) {
+      this.awayNagged = false;
+      host.log.warn(`checkin: 落账提醒没递出去：${msg(err)}`);
     }
   }
 
@@ -611,6 +677,9 @@ export class CheckinWorld implements World {
       this.lastEvalAt = now;
       await this.maybeNudge(host, now);
     }
+
+    // 递过「他走久了」但一直没落账的，补一次收尾（只记账、不开口）
+    if (!this.inQuiet(now)) await this.nagAwayVerdict(now);
 
     // 陪伴不看安静时段：是他自己摸出来的，有内容就递。
     await this.tickCompanion(host, now);
@@ -804,6 +873,10 @@ export class CheckinWorld implements World {
       pending: this.store.pending().length,
       staleMinutes: Math.round(this.staleAskedMs() / 60_000),
       awayAsked: this.awayAsked,
+      awayVerdictMinutes: Math.round(this.awayVerdictMs() / 60_000),
+      // null = 这趟没有待落账的由头；false = 已递由头、还没落账；true = 补过收尾（这趟不再提）
+      awayVerdict: this.awayAt === null ? null : this.awayNagged ? 'nagged' : 'waiting',
+      awayVerdictNoted: this.awayAt !== null && this.lastNoteAt >= this.awayAt,
       limits: lim,
       saidToday: soft.day === this.dayKey(now) ? soft.count : 0,
       saidLastHour: this.store.countSince(now, 60 * 60_000),
@@ -958,6 +1031,8 @@ export class CheckinWorld implements World {
         const minutes = clampInt(args.afterMinutes, 120, 1, 10080);
         const dueAt = Date.now() + minutes * 60_000;
         const thread = this.store.add(body, dueAt);
+        // 「他走了这趟，模型有没有留下结论」就靠这个时间点判断
+        this.lastNoteAt = Date.now();
         return `记下了（#${shortId(thread.id)}）：${body}。${this.dueText(dueAt)}`;
       },
     };

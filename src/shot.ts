@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-/** 一张给模型看的截图；只在被要求搭话时截，不存文件。 */
+/** 一张给模型看的截图；只在被要求搭话时截。扩展自己不写文件，交给框架后由附件库按内容哈希落盘。 */
 export interface Shot {
   bytes: Uint8Array;
   mime: string;

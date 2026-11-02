@@ -19,6 +19,10 @@ const SAMPLES_MAX = 240;
 const EVAL_MS = 15 * 60_000;
 /** 挨无视后最多退避到几倍间隔 */
 const IGNORED_MAX = 3;
+/** 「两条之间至少隔多久」填 0 时，退避就没有基数了，用这个兜底 */
+const GAP_FALLBACK_MIN = 5;
+/** 「隔多久看一眼屏幕」的上限（分钟） */
+const LOOK_MAX_MIN = 720;
 /** 挂着的跟进最多几条 */
 const MAX_PENDING = 20;
 /** 用户真的说话了的标记 */
@@ -94,7 +98,8 @@ export class CheckinWorld implements World {
   private samples: Sample[] = [];
   private lastSampleAt = 0;
   private lastEvalAt = 0;
-  private fired = new Set<string>();
+  /** 上一次按「看一眼屏幕」给由头是什么时候；0 = 还没给过 */
+  private lastLookAt = 0;
   /** 这次「人不在」是从什么时候开始的；null 表示人在。 */
   private awaySince: number | null = null;
   /** 上次说「回来啦」的时刻。 */
@@ -149,6 +154,13 @@ export class CheckinWorld implements World {
     };
   }
 
+  /** 「隔多久看一眼屏幕」的分钟数：0 = 关掉这种由头，上限 12 小时。 */
+  private lookEveryMinutes(): number {
+    const n = Math.round(Number(this.cfg.lookEveryMinutes));
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(LOOK_MAX_MIN, n);
+  }
+
   // ---------- World 接口 ----------
 
   envPromptVars(): Record<string, string> {
@@ -163,7 +175,7 @@ export class CheckinWorld implements World {
       'checkin.limits': [
         lim.perDay > 0 ? `一天最多 ${lim.perDay} 条` : '一天不限条数',
         lim.perHour > 0 ? `每小时最多 ${lim.perHour} 条` : '每小时不限',
-        lim.gap > 0 ? `两条之间至少隔 ${lim.gap} 分钟` : '两条之间不设间隔',
+        lim.gap > 0 ? `两条之间至少隔 ${lim.gap} 分钟` : `两条之间不设间隔，被无视时按 ${GAP_FALLBACK_MIN} 分钟的基数退避`,
         `同一个程序得先连续待满 ${lim.sameApp} 分钟`,
       ].join('、'),
       'checkin.away':
@@ -176,6 +188,9 @@ export class CheckinWorld implements World {
       'checkin.companion': this.companionEnabled()
         ? `陪着看 ${this.companionMinutes()} 分钟，每 ${Math.round(this.companionEveryMs() / 60_000)} 分钟递一眼（一共 ${this.companionTotal()} 眼，第一眼带 speak）`
         : '连着摸你两下已经关掉了，收不到这种陪伴',
+      'checkin.look': this.lookEveryMinutes() > 0
+        ? `另外每隔 ${this.lookEveryMinutes()} 分钟会主动看一眼 TA 现在在做什么，不管窗口换没换`
+        : '「按时间看一眼屏幕」这种由头关着，只有同一个程序待久了才给',
     };
     // 0.1.7 及以前发布的是下划线名；这一版仍留别名，别人改过自己的 ENV_PROMPT 也不会渲染出裸的 {{…}}。
     // 计划 0.2.0 删掉——新写的模板一律用点号，下面这些别名不进 promptDocs.vars、也不出现在任何文档里。
@@ -189,6 +204,7 @@ export class CheckinWorld implements World {
     vars.checkin_stale = vars['checkin.stale'];
     vars.checkin_backGap = vars['checkin.backGap'];
     vars.checkin_awayVerdict = vars['checkin.awayVerdict'];
+    vars.checkin_look = vars['checkin.look'];
     return vars;
   }
 
@@ -245,6 +261,7 @@ export class CheckinWorld implements World {
             { name: 'checkin.backGap', description: zh ? '两次「回来时说一句」之间至少隔多久。' : 'Minimum gap between two welcome-back lines.' },
             { name: 'checkin.awayVerdict', description: zh ? '递出「他走久了」之后，等多久还没落账就补一条只记账、不许开口的收尾（固定 20 分钟，只补一次）。' : 'After the away cue, how long to wait for a recorded verdict before sending one record-only nudge (fixed at 20 minutes, sent once).' },
             { name: 'checkin.companion', description: zh ? '连摸两下之后陪多久、隔多久递一眼、一共几眼。' : 'How long the post-pet company lasts, how often a glance arrives, and how many glances in total.' },
+            { name: 'checkin.look', description: zh ? '「按时间看一眼屏幕」这种由头的间隔；关掉时这里会写明只有程序待久了才给。' : 'Interval of the timed screen glance cue; when off, this says only the stay-in-one-app cue remains.' },
           ],
         },
       ],
@@ -253,6 +270,8 @@ export class CheckinWorld implements World {
 
   async start(host: WorldHost): Promise<void> {
     this.host = host;
+    // 「按时间看一眼」从启动那一刻开始计时：刚打开就递一眼没有意义，等满一个间隔再说
+    this.lastLookAt = Date.now();
     this.timer = setInterval(() => {
       void this.tick();
     }, TICK_MS);
@@ -673,6 +692,8 @@ export class CheckinWorld implements World {
       }
     }
 
+    if (!this.inQuiet(now)) await this.maybeLook(host, now);
+
     if (!this.inQuiet(now) && now - this.lastEvalAt >= EVAL_MS) {
       this.lastEvalAt = now;
       await this.maybeNudge(host, now);
@@ -724,15 +745,15 @@ export class CheckinWorld implements World {
     if (streak < lim.sameApp) return;
 
     const day = this.dayKey(now);
-    const key = `${current.proc.toLowerCase()}|${day}`;
-    if (this.fired.has(key)) return;
 
     const soft = this.store.soft();
     if (lim.perDay > 0 && soft.day === day && soft.count >= lim.perDay) return;
     if (lim.perHour > 0 && this.store.countSince(now, 60 * 60_000) >= lim.perHour) return;
 
-    const gap = lim.gap * 60_000 * Math.min(2 ** soft.ignored, 2 ** IGNORED_MAX);
-    if (lim.gap > 0 && soft.lastAt && now - soft.lastAt < gap) return;
+    // 间隔填 0 时也要有个基数，否则「被无视就退避」等于没退避
+    const base = lim.gap > 0 ? lim.gap : GAP_FALLBACK_MIN;
+    const gap = base * 60_000 * Math.min(2 ** soft.ignored, 2 ** IGNORED_MAX);
+    if (soft.lastAt && now - soft.lastAt < gap) return;
 
     // 上次搭话后他一句话都没接 → 退避一步；接了 → 回到基准
     const ignored = soft.lastAt > 0 && !this.spokeSince(soft.lastAt) ? Math.min(soft.ignored + 1, IGNORED_MAX) : 0;
@@ -744,7 +765,6 @@ export class CheckinWorld implements World {
       (shot ? '顺手截了一张图，你自己看。' : '') +
       '要是这会儿有句短的想说，就说出来（气泡，一两行）；说完回去接着干你的。真没话说再沉默。';
 
-    this.fired.add(key);
     this.store.rollDay(day);
     this.store.markSoft(day, now, ignored);
 
@@ -768,6 +788,57 @@ export class CheckinWorld implements World {
       );
     } catch (err) {
       host.log.warn(`checkin: 搭话没能送出去：${msg(err)}`);
+    }
+  }
+
+  /**
+   * 另一条给由头的路：不管窗口换没换，每隔 N 分钟主动看一眼屏幕，
+   * 让他知道你现在在做什么。跟「同一程序待久了」互不影响，各有各的开关。
+   */
+  private async maybeLook(host: WorldHost, now: number): Promise<void> {
+    const every = this.lookEveryMinutes();
+    if (!every || !this.cfg.watchActivity) return;
+    if (this.lastLookAt && now - this.lastLookAt < every * 60_000) return;
+    const current = this.samples[this.samples.length - 1];
+    if (!current || !current.proc || isSelfApp(current.proc)) return;
+    // 人不在，看了也白看
+    const idleNow = current.idleMs + Math.max(0, now - current.at);
+    if (idleNow > this.awayThreshold(current)) return;
+
+    const prev = this.lastLookAt;
+    this.lastLookAt = now;
+    const streak = this.continuousMinutes();
+    const shot = await this.takeShot();
+    const body =
+      `你每隔 ${every} 分钟会看一眼 TA 现在在做什么。这会儿前台是「${current.proc}」` +
+      `（窗口标题：${briefTitle(current.title)}），` +
+      `${idleNow < 60_000 ? '刚刚还在动键鼠' : `键鼠有 ${Math.round(idleNow / 60_000)} 分钟没动`}` +
+      (streak > 0 ? `，同一件事已经连着 ${streak} 分钟` : '') +
+      `。最近一小时：${this.recentSummary(now)}。` +
+      (shot ? '顺手截了一张整个屏幕的图，你自己看。' : '') +
+      '看一眼就知道他在忙什么了：想说句短的就这会儿说（气泡，一两行），没想说的就当没这一眼。';
+
+    try {
+      await host.pushEvent(
+        {
+          type: 'checkin.activity',
+          ts: new Date(now).toISOString(),
+          source: this.id,
+          text: body,
+          tags: ['speak'],
+          blobs: shot ? [shot] : undefined,
+          meta: {
+            proc: current.proc,
+            look: true,
+            idleMs: current.idleMs,
+            streakMinutes: streak,
+          },
+        },
+        { trigger: 'flush' },
+      );
+    } catch (err) {
+      this.lastLookAt = prev;
+      host.log.warn(`checkin: 这一眼没递出去：${msg(err)}`);
     }
   }
 
@@ -877,6 +948,11 @@ export class CheckinWorld implements World {
       // null = 这趟没有待落账的由头；false = 已递由头、还没落账；true = 补过收尾（这趟不再提）
       awayVerdict: this.awayAt === null ? null : this.awayNagged ? 'nagged' : 'waiting',
       awayVerdictNoted: this.awayAt !== null && this.lastNoteAt >= this.awayAt,
+      lookEveryMinutes: this.lookEveryMinutes(),
+      lastLookAt: this.lastLookAt ? new Date(this.lastLookAt).toISOString() : null,
+      lookDueIn: this.lookEveryMinutes() > 0 && this.lastLookAt
+        ? Math.max(0, Math.round((this.lastLookAt + this.lookEveryMinutes() * 60_000 - now) / 60_000))
+        : 0,
       limits: lim,
       saidToday: soft.day === this.dayKey(now) ? soft.count : 0,
       saidLastHour: this.store.countSince(now, 60 * 60_000),

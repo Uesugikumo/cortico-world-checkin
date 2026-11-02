@@ -15,6 +15,8 @@ export const CHECKIN_DEFAULTS = {
   quietTo: '04:30',
   /** 同一个程序要连着待满多久才给一个由头（分钟） */
   sameAppMinutes: 90,
+  /** 另一条给由头的路：每隔多久主动看一眼屏幕（分钟）；0 = 关掉 */
+  lookEveryMinutes: 30,
   /** 两条搭话之间至少隔多久（分钟），被无视会自动翻倍；0 = 不设间隔 */
   softGapMinutes: 90,
   /** 一小时内最多几条；0 = 不限 */
@@ -48,6 +50,7 @@ export interface CheckinConfigSection {
   quietFrom: string;
   quietTo: string;
   sameAppMinutes: number;
+  lookEveryMinutes: number;
   softGapMinutes: number;
   softPerHour: number;
   softPerDay: number;
@@ -113,6 +116,15 @@ export function checkinConfigGroups(language: Language): ConfigGroup[] {
             'x-hot': true,
             'x-suffix': MINUTE,
             description: t.sameAppDescription,
+          },
+          'worlds.checkin.lookEveryMinutes': {
+            type: 'integer',
+            title: t.lookTitle,
+            minimum: 0,
+            maximum: 720,
+            'x-hot': true,
+            'x-suffix': MINUTE,
+            description: t.lookDescription,
           },
         },
       },

@@ -22,6 +22,8 @@ export interface CheckinText {
   quietToDescription: string;
   sameAppTitle: string;
   sameAppDescription: string;
+  lookTitle: string;
+  lookDescription: string;
   softGapTitle: string;
   softGapDescription: string;
   softPerHourTitle: string;
@@ -61,7 +63,7 @@ const ZH: CheckinText = {
   lampHintOff: '只跟进挂着的事，不看窗口',
   badgePending: '待跟进',
   groupTalkTitle: '搭话',
-  groupTalkDescription: '监测、截图、间隔、持续：看窗口的频率，和待够了才递一个由头。',
+  groupTalkDescription: '监测、截图、间隔、持续：看窗口的频率，和什么时候递一个由头（待够了，或者到点看一眼）。',
   groupPetTitle: '桌宠上的动作',
   groupPetDescription: '摸它、戳它之后会发生什么。',
   groupAwayTitle: '离开与回来',
@@ -76,8 +78,10 @@ const ZH: CheckinText = {
   quietToDescription: '本地时间 HH:MM，可以跨午夜。',
   sameAppTitle: '持续',
   sameAppDescription: '一直在同一个窗口前待够这么久，才会递一个由头。可调小，代价是更容易被小事打断。',
+  lookTitle: '看一眼屏幕',
+  lookDescription: '另一种给由头的方式：不管换没换窗口，每隔这么久主动看一眼你屏幕，让它知道你现在在做什么。0 = 关掉，只按上面的「持续」给。',
   softGapTitle: '两条之间至少隔',
-  softGapDescription: '被无视会自动翻倍，最多八倍。0 = 不设间隔。',
+  softGapDescription: '被无视会自动翻倍，最多八倍。0 = 不设间隔，但退避仍按 5 分钟起算。',
   softPerHourTitle: '每小时最多',
   softPerHourDescription: '只在真的开口时计数，沉默不算。0 = 不限。',
   softPerDayTitle: '一天最多',
@@ -85,7 +89,7 @@ const ZH: CheckinText = {
   sampleTitle: '间隔',
   sampleDescription: '多久看一次前台窗口。样本只在内存里存最近约四小时。',
   screenshotTitle: '截图',
-  screenshotDescription: '真要开口的时候截一张前台窗口的图给模型看（JPEG、约 1280 宽、不存文件）。当前模型看不了图时自动跳过。',
+  screenshotDescription: '真要开口的时候截一张整个屏幕的图给模型看（JPEG、约 1280 宽、不存文件）。当前模型看不了图时自动跳过。',
   pokeTitle: '连戳两下就搭话',
   pokeDescription: '连着戳它两下（两下要在两三秒内），它就看一眼你正在做什么，再决定要不要说句话。单戳一下不算。',
   companionTitle: '连摸两下就陪着看',
@@ -116,7 +120,7 @@ const EN: CheckinText = {
   lampHintOff: 'Following up on notes only',
   badgePending: 'Pending',
   groupTalkTitle: 'Small talk',
-  groupTalkDescription: 'Monitoring, screenshot, interval and stay-for: how often it looks at the window, and how long you must stay in one app before it offers a reason to speak.',
+  groupTalkDescription: 'Monitoring, screenshot, interval and stay-for: how often it looks at the window, and when it offers a reason to speak (staying put, or a timed glance).',
   groupPetTitle: 'Pet actions',
   groupPetDescription: 'What a poke or a pet does.',
   groupAwayTitle: 'Away and back',
@@ -131,8 +135,10 @@ const EN: CheckinText = {
   quietToDescription: 'Local time HH:MM; may cross midnight.',
   sameAppTitle: 'Stay for',
   sameAppDescription: 'Only after staying in the same window this long does it offer a reason to speak. Lower means more interruptions.',
+  lookTitle: 'Timed glance at the screen',
+  lookDescription: 'A second way to get a cue: regardless of window switches, take a look every so often so it knows what you are doing. 0 = off, leaving only the stay-for cue above.',
   softGapTitle: 'Gap between check-ins',
-  softGapDescription: 'Doubles when ignored, up to eight times. 0 = no minimum gap.',
+  softGapDescription: 'Doubles when ignored, up to eight times. 0 = no minimum gap (backoff still starts from 5 minutes).',
   softPerHourTitle: 'Max per hour',
   softPerHourDescription: 'Only counts times it actually spoke; silence does not count. 0 = unlimited.',
   softPerDayTitle: 'Max per day',
@@ -140,7 +146,7 @@ const EN: CheckinText = {
   sampleTitle: 'Interval',
   sampleDescription: 'How often the foreground window is sampled. Samples stay in memory (about four hours).',
   screenshotTitle: 'Screenshot',
-  screenshotDescription: 'Captures the foreground window as a JPEG (about 1280 wide, no file kept) so the model can see it. Skipped when the current model cannot read images.',
+  screenshotDescription: 'Captures the whole screen as a JPEG (about 1280 wide, no file kept) so the model can see it. Skipped when the current model cannot read images.',
   pokeTitle: 'Double-poke the pet to speak up',
   pokeDescription: 'Poke it twice within a couple of seconds and it will take a look at what you are doing, then decide whether to say a line. A single poke does nothing.',
   companionTitle: 'Two pets and it looks along',

@@ -18,6 +18,7 @@ function mountProbe(ctx) {
   const shotPill = ui.pill('—', 'plain');
   const pokePill = ui.pill('—', 'plain');
   const companionPill = ui.pill('—', 'plain');
+  const topPill = ui.pill('—', 'plain');
   const watchPill = ui.pill('—', 'plain');
   const intervalText = ui.h('span', 'mono', '—');
   const rateText = ui.h('span', 'mono', '—');
@@ -32,6 +33,7 @@ function mountProbe(ctx) {
 
   sheet.body.append(
     ui.field('监测', watchPill),
+    ui.field('看一眼屏幕', topPill),
     ui.field('采样间隔', intervalText),
     ui.field('搭话时截图', shotPill),
     ui.field('连戳两下桌宠', pokePill),
@@ -88,6 +90,11 @@ function mountProbe(ctx) {
     else { shotPill.textContent = '开（没确认）'; shotPill.className = 'pill plain'; }
     if (st.pokeNudge === false) { pokePill.textContent = '关着'; pokePill.className = 'pill off'; }
     else { pokePill.textContent = '连戳两下就说话'; pokePill.className = 'pill on'; }
+    const lookEvery = Number.isFinite(st.lookEveryMinutes) ? st.lookEveryMinutes : 0;
+    if (!lookEvery) { topPill.textContent = '关着（只按「持续」给）'; topPill.className = 'pill off'; }
+    else if (!st.watching) { topPill.textContent = '监测关着，用不上'; topPill.className = 'pill off'; }
+    else if (st.lastLookAt) { topPill.textContent = `每 ${lookEvery} 分钟一眼 · 还有 ${st.lookDueIn ?? 0} 分钟`; topPill.className = 'pill on'; }
+    else { topPill.textContent = `每 ${lookEvery} 分钟一眼`; topPill.className = 'pill on'; }
     const every = Number.isFinite(st.companionEveryMinutes) ? st.companionEveryMinutes : 2;
     const span = Number.isFinite(st.companionMinutes) ? st.companionMinutes : 10;
     const eyes = Number.isFinite(st.companionTotal) ? st.companionTotal : 5;

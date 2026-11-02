@@ -13,7 +13,7 @@ const TIMEOUT_MS = 15_000;
 const MAX_BYTES = 4 * 1024 * 1024;
 
 /**
- * 截一张前台窗口的图（取不到就整屏），缩放后以 JPEG 交回。
+ * 截一张整个屏幕的图（多显示器时是所有屏幕的并集），缩放后以 JPEG 交回。
  * 非 Windows、脚本报错、或尺寸离谱时返回 null——搭话照常进行，只是没有图。
  */
 export function captureScreen(): Promise<Shot | null> {

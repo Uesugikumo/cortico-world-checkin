@@ -3,9 +3,10 @@
 ## 0.1.11（未发布）
 
 - 「他走了很久」这条由头现在**要求落账**：正文末尾从「问完记一笔，找不到工具就什么都不做」改成硬性收尾——不管问不问，都得用 `checkin_note` 写一条结论；决定不打扰也要写下来，什么都不留不算处理完。
-- 新增**落账收尾**：递出由头之后过了 `awayMinutes`（跟「多久不动算离开」同一个数，就是 `{{checkin.away}}` 里那个数）还没调过 `checkin_note`，就再推一条 `checkin.away`（`meta.verdict: 'reminder'`、`tags: []`），正文明确「不要开口、也不要给 TA 发消息，只把结论写进 `checkin_note`」。**一趟只补一次**，补过就不再提；人回来了就复位；如果连这条也不理，只在日志里留一句 `checkin: 这趟离开没落账`。
+- 新增**落账收尾**：递出由头之后过了 **20 分钟**（`AWAY_VERDICT_MIN`，固定值，不跟 `awayMinutes` 联动、也不进设置页——这是记账时限，跟离开判定是两件事）还没调过 `checkin_note`，就再推一条 `checkin.away`（`meta.verdict: 'reminder'`、`tags: []`），正文明确「不要开口、也不要给 TA 发消息，只把结论写进 `checkin_note`」。**一趟只补一次**，补过就不再提；人回来了就复位；如果连这条也不理，只在日志里留一句 `checkin: 这趟离开没落账`。
 - 安静时段不补；这趟已经记过笔记（`lastNoteAt >= awayAt`）就不补。之所以这么设计：框架没有强制工具调用的手段（World 侧只有 `trigger`/`deliver`，`tool_choice` 在协议层），只能靠「措辞硬性要求 + 一次只记账的补账」逼近，同时保证不会变成连环催。
-- 新变量 `{{checkin.awayVerdict}}`（补账等待时长），进了 `promptDocs.vars`，下划线别名 `checkin_awayVerdict`；`{{checkin.away}}` 的值补一句「递给你之后再过 N 分钟还没落账会补一条只记账的提醒」。
+- 新变量 `{{checkin.awayVerdict}}`（补账等待时长，固定 20 分钟），进了 `promptDocs.vars`，下划线别名 `checkin_awayVerdict`；`{{checkin.away}}` 的值补一句「递给你之后再过 20 分钟还没落账会补一条只记账的提醒」。
+- **截图从「前台窗口」改成「整个屏幕」**（`src\shot.ps1`）：原来先用 `GetForegroundWindow` + `GetWindowRect` 裁出前台窗口，取不到才退到整屏；现在直接用 `SystemInformation.VirtualScreen` 截全部屏幕（多显示器时是所有屏幕的并集），逻辑只剩一条路径。缩放（1280 宽、JPEG 70）和「只在内存里、不落盘」没变。
 - 状态页「离开判定 / 回来问候」那行在人不在时多一段：`· 还没落账（N 分钟后补一次）` / `· 补过收尾，仍未落账` / `· 这趟已落账`。
 - 测试补 `[48]`–`[48h]`：还没到点不补、到点补一条且 `tags` 为空、同一趟只补一次、回来复位、已落账不补、状态字段、人回来了不补。
 

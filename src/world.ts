@@ -47,9 +47,10 @@ const BACK_LONG_MS = 8 * 60 * 60_000;
 const STALE_UNASKED_MS = 3 * 24 * 60 * 60_000;
 /**
  * 递出「他走久了」之后过多久还没落账，就补一条「只记账、别开口」的收尾。
- * 这个时长直接跟「多久不动算离开」用同一个数（见 awayVerdictMs），
+ * 这是「记账的时限」，跟「多久不动算离开」是两件事，所以固定 20 分钟、不进设置页。
  * 只补一次：不打扰用户是底线，逼模型给出结论只需要一次机会。
  */
+const AWAY_VERDICT_MIN = 20;
 
 /** 一次「看一眼」的结果：可能是刚采的，也可能是拿上一次的样本兜底。 */
 interface Look {
@@ -168,7 +169,7 @@ export class CheckinWorld implements World {
       'checkin.away':
         `键鼠有 ${this.awayMinutes()} 分钟没动就算 TA 离开了（看视频时放宽到 ${this.awayMinutes() * 2} 分钟）。` +
         '走久了还没回来，系统会给你一个由头；想在 QQ 上问一句，就自己去 QQ 那边的工具里找会话，不想找就先等着。' +
-        `递给你之后再过 ${this.awayMinutes()} 分钟还没用 checkin_note 落账，会补一条只让你记账、不许开口的收尾（只补一次）。`,
+        `递给你之后再过 ${AWAY_VERDICT_MIN} 分钟还没用 checkin_note 落账，会补一条只让你记账、不许开口的收尾（只补一次）。`,
       'checkin.stale': `${Math.round(this.staleAskedMs() / 60_000)} 分钟`,
       'checkin.backGap': `${Math.round(BACK_MIN_GAP_MS / 60_000)} 分钟`,
       'checkin.awayVerdict': `${Math.round(this.awayVerdictMs() / 60_000)} 分钟`,
@@ -242,7 +243,7 @@ export class CheckinWorld implements World {
             { name: 'checkin.away', description: zh ? '离开的判定（分钟，看视频放宽一倍）和走久了递由头的口径；要不要在 QQ 上问、问给谁，交给模型自己找。' : 'How absence is judged (doubled while watching video) and what the cue says; whether to ask on QQ and who to ask is up to the model.' },
             { name: 'checkin.stale', description: zh ? '提醒过一次、一直没有结果的跟进，过多少分钟自动销账。' : 'How long an asked, still unanswered follow-up stays before it is swept.' },
             { name: 'checkin.backGap', description: zh ? '两次「回来时说一句」之间至少隔多久。' : 'Minimum gap between two welcome-back lines.' },
-            { name: 'checkin.awayVerdict', description: zh ? '递出「他走久了」之后，等多久还没落账就补一条只记账、不许开口的收尾（只补一次）。' : 'After the away cue, how long to wait for a recorded verdict before sending one record-only nudge (once only).' },
+            { name: 'checkin.awayVerdict', description: zh ? '递出「他走久了」之后，等多久还没落账就补一条只记账、不许开口的收尾（固定 20 分钟，只补一次）。' : 'After the away cue, how long to wait for a recorded verdict before sending one record-only nudge (fixed at 20 minutes, sent once).' },
             { name: 'checkin.companion', description: zh ? '连摸两下之后陪多久、隔多久递一眼、一共几眼。' : 'How long the post-pet company lasts, how often a glance arrives, and how many glances in total.' },
           ],
         },
@@ -496,11 +497,10 @@ export class CheckinWorld implements World {
 
   /**
    * 递出「他走久了」之后，等多久还没落账就补一条收尾。
-   * 直接跟「多久不动算离开」用同一个数——就是提示词里 {{checkin.away}} 那个数，
-   * 不额外加配置项（用户 m08100 的意思：R 就取这个变量的值）。
+   * 固定 20 分钟，不跟 awayMinutes 联动、也不进设置页（这是记账时限，不是离开判定）。
    */
   private awayVerdictMs(): number {
-    return this.awayMinutes() * 60_000;
+    return AWAY_VERDICT_MIN * 60_000;
   }
 
   /**

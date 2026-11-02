@@ -205,8 +205,7 @@ export class CheckinWorld implements World {
       ].join('、'),
       'checkin.away':
         `键鼠有 ${this.awayMinutes()} 分钟没动就算 TA 离开了（看视频时放宽到 ${this.awayMinutes() * 2} 分钟）。` +
-        '走久了还没回来，系统会给你一个由头；想在 QQ 上问一句，就自己去 QQ 那边的工具里找会话，不想找就先等着。' +
-        `递给你之后再过 ${AWAY_VERDICT_MIN} 分钟还没用 checkin_note 落账，会补一条只让你记账、不许开口的收尾（只补一次）。`,
+        '走久了还没回来，系统会给你一个由头。',
       'checkin.stale': `${Math.round(this.staleAskedMs() / 60_000)} 分钟`,
       'checkin.backGap': `${Math.round(BACK_MIN_GAP_MS / 60_000)} 分钟`,
       'checkin.awayVerdict': `${Math.round(this.awayVerdictMs() / 60_000)} 分钟`,
@@ -750,8 +749,8 @@ export class CheckinWorld implements World {
       host.log.info(`checkin: 清掉 ${stale.length} 条过期的跟进`);
     }
 
-    // 到点的跟进：安静时段先不吵，等出来再说
-    if (!this.inQuiet(now)) {
+    // 到点的跟进：安静时段先不吵，等出来再说；人不在也先攒着，等他回来再提
+    if (!this.inQuiet(now) && this.awaySince === null) {
       for (const th of this.store.due(now)) this.pushDue(host, th, now);
     }
 

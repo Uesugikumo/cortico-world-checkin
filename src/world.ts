@@ -5,7 +5,7 @@ import type { Language } from 'cortico/core/language.ts';
 import type { BlobInput, ToolDef, World, WorldHost, WorldLamp, WorldWebUiDecl } from 'cortico/core/types.ts';
 import { briefTitle, isSelfApp, isWatchingVideo, sampleForeground, type Sample } from './activity.ts';
 import { checkinConfigGroups, type CheckinConfigSection } from './config.ts';
-import { captureScreen } from './shot.ts';
+import { capturePrint, captureScreen, changedRatio } from './shot.ts';
 import { ThreadStore, type Thread } from './store.ts';
 import { text } from './strings.ts';
 
@@ -25,9 +25,16 @@ const GAP_FALLBACK_MIN = 5;
 const LOOK_MAX_MIN = 720;
 /** 「隔多久看一眼屏幕」的默认值：老配置里没有这个键时用 */
 const LOOK_DEFAULT_MIN = 30;
-/** 「键鼠停多久就不给由头」的上限与默认（分钟） */
-const IDLE_SKIP_MAX_MIN = 240;
-const IDLE_SKIP_DEFAULT_MIN = 5;
+/** 键鼠停多久之后，开始拿画面来判断「他是不是还在看」 */
+const FOCUS_IDLE_MS = 3 * 60_000;
+/** 画面停住多久就算「人大概不在」——看书看画时画面总还在变（翻页、动画、光标） */
+const STILL_WINDOW_MS = 10 * 60_000;
+/** 两张画面指纹之间，单格亮度差多少才算变 */
+const PRINT_CELL_DELTA = 24;
+/** 变了的格子占比超过这个数才叫「画面在变」（挡住秒表、光标这种小面积抖动） */
+const PRINT_CHANGE_RATIO = 0.05;
+/** 两次取指纹之间至少隔这么久，别为了判断把截图当采样器用 */
+const PRINT_MIN_INTERVAL_MS = 60_000;
 /** 挂着的跟进最多几条 */
 const MAX_PENDING = 20;
 /** 用户真的说话了的标记 */
@@ -76,6 +83,8 @@ interface Deps {
   timezone: string;
   /** 写回 config.json（框架的 ctx.persist）；面板上改的那一项要靠它落盘。 */
   persist?: (patch: Record<string, unknown>) => void;
+  /** 取「画面指纹」的方式；只有测试会换掉它。 */
+  print?: () => Promise<Uint8Array | null>;
 }
 
 export class CheckinWorld implements World {
@@ -105,6 +114,12 @@ export class CheckinWorld implements World {
   private lastEvalAt = 0;
   /** 上一次按「看一眼屏幕」给由头是什么时候；0 = 还没给过 */
   private lastLookAt = 0;
+  /** 上一次取到的画面指纹（32x18 灰度），只在本机内存里做比对 */
+  private lastPrint: Uint8Array | null = null;
+  /** 上一次取指纹的时刻 */
+  private printAt = 0;
+  /** 画面最后一次「明显变了」的时刻；0 = 还没观察到变化 */
+  private lastChangeAt = 0;
   /** 这次「人不在」是从什么时候开始的；null 表示人在。 */
   private awaySince: number | null = null;
   /** 上次说「回来啦」的时刻。 */
@@ -186,9 +201,7 @@ export class CheckinWorld implements World {
         lim.perHour > 0 ? `每小时最多 ${lim.perHour} 条` : '每小时不限',
         lim.gap > 0 ? `两条之间至少隔 ${lim.gap} 分钟` : `两条之间不设间隔，被无视时按 ${GAP_FALLBACK_MIN} 分钟的基数退避`,
         `同一个程序得先连续待满 ${lim.sameApp} 分钟`,
-        this.idleSkipMinutes() > 0
-          ? `键鼠停着超过 ${this.idleSkipMinutes()} 分钟就不算盯着屏幕了，不给由头（看片放宽到 ${this.idleSkipMinutes() * 2} 分钟）`
-          : '键鼠停着也算盯着屏幕（不判空闲）',
+        `键鼠停着超过 ${FOCUS_IDLE_MS / 60_000} 分钟时，要看画面还在不在动；画面停住超过 ${STILL_WINDOW_MS / 60_000} 分钟就不给由头了`,
       ].join('、'),
       'checkin.away':
         `键鼠有 ${this.awayMinutes()} 分钟没动就算 TA 离开了（看视频时放宽到 ${this.awayMinutes() * 2} 分钟）。` +
@@ -203,6 +216,10 @@ export class CheckinWorld implements World {
       'checkin.look': this.lookEveryMinutes() > 0
         ? `不管窗口有没有换，每隔 ${this.lookEveryMinutes()} 分钟会主动看一眼 TA 现在在做什么`
         : '「按时间看一眼屏幕」关着，只有同一个程序待久了才给由头',
+      'checkin.focus':
+        `他手停着不动、但屏幕上的东西一直在变的时候，人是在的（看书、看画、看片都这样）——` +
+        `这种时候照样可以搭话，只是要就着屏幕上的内容说，别问「你在干嘛」「你还在吗」。` +
+        `屏幕停住超过 ${STILL_WINDOW_MS / 60_000} 分钟以上，才当他真的不在。`,
     };
     // 0.1.7 及以前发布的是下划线名；这一版仍留别名，别人改过自己的 ENV_PROMPT 也不会渲染出裸的 {{…}}。
     // 计划 0.2.0 删掉——新写的模板一律用点号，下面这些别名不进 promptDocs.vars、也不出现在任何文档里。
@@ -217,6 +234,7 @@ export class CheckinWorld implements World {
     vars.checkin_backGap = vars['checkin.backGap'];
     vars.checkin_awayVerdict = vars['checkin.awayVerdict'];
     vars.checkin_look = vars['checkin.look'];
+    vars.checkin_focus = vars['checkin.focus'];
     return vars;
   }
 
@@ -274,6 +292,7 @@ export class CheckinWorld implements World {
             { name: 'checkin.awayVerdict', description: zh ? '递出「他走久了」之后，等多久还没落账就补一条只记账、不许开口的收尾（固定 20 分钟，只补一次）。' : 'After the away cue, how long to wait for a recorded verdict before sending one record-only nudge (fixed at 20 minutes, sent once).' },
             { name: 'checkin.companion', description: zh ? '连摸两下之后陪多久、隔多久递一眼、一共几眼。' : 'How long the post-pet company lasts, how often a glance arrives, and how many glances in total.' },
             { name: 'checkin.look', description: zh ? '「按时间看一眼屏幕」这种由头的间隔；关掉时这里会写明只有程序待久了才给。' : 'Interval of the timed screen glance cue; when off, this says only the stay-in-one-app cue remains.' },
+            { name: 'checkin.focus', description: zh ? '键鼠停着时怎么判断他还在不在看：看画面有没有在变，以及停住多久才算真不在。' : 'How it tells whether he is still watching while the mouse is idle: by whether the screen keeps changing, and how long a frozen screen counts as gone.' },
           ],
         },
       ],
@@ -520,14 +539,6 @@ export class CheckinWorld implements World {
     return Math.max(1, Math.min(240, Math.round(Number(this.cfg.awayMinutes) || 15)));
   }
 
-  /** 配置里的「键鼠停多久就不给由头」，0 = 不判；夹在 0–240 分钟。没这个键的老配置按默认 5 分钟。 */
-  private idleSkipMinutes(): number {
-    const raw = this.cfg.idleSkipMinutes;
-    const n = raw === undefined || raw === null ? IDLE_SKIP_DEFAULT_MIN : Math.round(Number(raw));
-    if (!Number.isFinite(n) || n <= 0) return 0;
-    return Math.min(IDLE_SKIP_MAX_MIN, n);
-  }
-
   /** 这次算「人不在」的 idle 阈值；看片时放宽一倍（捏着手柄不碰键鼠是常态）。 */
   private awayThreshold(sample: Sample): number {
     const base = this.awayMinutes() * 60_000;
@@ -535,14 +546,37 @@ export class CheckinWorld implements World {
   }
 
   /**
-   * 人还在这台电脑前、但键鼠停了一会儿——这时候递由头等于对着空椅子说话
-   * （正文会写「键鼠有 N 分钟没动」，模型也读不出那是「在发呆」还是「刚走」）。
-   * 0 = 不判，仍然只看「离开判定」。看片时同样放宽一倍。
+   * 取一张画面指纹，和上一张比一比，记下「画面最后一次变」的时刻。
+   * 只在键鼠停着、需要判断「他是不是还在看」的时候才调，平时一次都不截。
+   * 拿不到画面就当「不知道」——不额外拦，仍按原来的离开判定走。
    */
-  private idleSkipMs(sample: Sample): number {
-    const base = this.idleSkipMinutes() * 60_000;
-    if (!base) return 0;
-    return isWatchingVideo(sample.proc, sample.title) ? base * 2 : base;
+  private async refreshPrint(now: number): Promise<void> {
+    if (this.printAt && now - this.printAt < PRINT_MIN_INTERVAL_MS) return;
+    const next = await (this.deps.print ?? capturePrint)();
+    if (!next) return;
+    this.printAt = now;
+    if (!this.lastPrint) {
+      // 第一次拿到画面：当成「刚从在变的状态开始看」，从这里起算静止了多久
+      this.lastPrint = next;
+      this.lastChangeAt = now;
+      return;
+    }
+    if (changedRatio(this.lastPrint, next, PRINT_CELL_DELTA) > PRINT_CHANGE_RATIO) {
+      this.lastChangeAt = now;
+    }
+    this.lastPrint = next;
+  }
+
+  /**
+   * 键鼠停着的时候，他到底还在不在看——这是「画面有没有在变」能回答的，
+   * `idleMs` 回答不了（看书看画时手就是不动，人却一直在）。
+   * 返回 true = 画面在变，当成「他在看」；false = 画面停住了，别去打扰。
+   * 拿不到画面时返回 true（不知道就别多拦）。
+   */
+  private async focusWatching(now: number): Promise<boolean> {
+    await this.refreshPrint(now);
+    if (!this.lastChangeAt) return true;
+    return now - this.lastChangeAt <= STILL_WINDOW_MS;
   }
 
   /**
@@ -770,9 +804,9 @@ export class CheckinWorld implements World {
     const idleNow = current.idleMs + Math.max(0, now - current.at);
     const away = this.awayThreshold(current);
     if (idleNow > away) return;
-    // 还在电脑前，但键鼠停了一阵子：照样别推（人可能正发呆/在别处）
-    const skip = this.idleSkipMs(current);
-    if (skip > 0 && idleNow > skip) return;
+    // 键鼠停着不代表人不在：看书画画时手就是不动。这时候看画面有没有在变——
+    // 画面停了十分钟以上才当「人大概走了」，画面还在动就照常说话。
+    const focused = idleNow > FOCUS_IDLE_MS;
 
     const streak = this.continuousMinutes();
     const lim = this.limits();
@@ -792,10 +826,15 @@ export class CheckinWorld implements World {
     // 上次搭话后他一句话都没接 → 退避一步；接了 → 回到基准
     const ignored = soft.lastAt > 0 && !this.spokeSince(soft.lastAt) ? Math.min(soft.ignored + 1, IGNORED_MAX) : 0;
 
+    // 前面那些便宜的条件都过了，才值得真去取一张画面指纹
+    if (focused && !(await this.focusWatching(now))) return;
+
     const shot = await this.takeShot();
+    const focusNote = focused ? `他 ${Math.round(idleNow / 60_000)} 分钟没动键鼠了，但画面一直在变（多半在看书、看画或者看片）。` : '';
     const body =
       `他已经在「${current.proc}」前面连着待了 ${streak} 分钟，中间没换过窗口` +
       `（窗口标题：${briefTitle(current.title)}）。最近一小时：${this.recentSummary(now)}。` +
+      focusNote +
       (shot ? '顺手截了一张图，你自己看。' : '') +
       '要是这会儿有句短的想说，就说出来（气泡，一两行）；说完回去接着干你的。真没话说再沉默。';
 
@@ -815,6 +854,7 @@ export class CheckinWorld implements World {
             proc: current.proc,
             streakMinutes: streak,
             idleMs: current.idleMs,
+            focused,
             ignored,
           },
         },
@@ -838,17 +878,20 @@ export class CheckinWorld implements World {
     // 人不在，看了也白看
     const idleNow = current.idleMs + Math.max(0, now - current.at);
     if (idleNow > this.awayThreshold(current)) return;
-    const skip = this.idleSkipMs(current);
-    if (skip > 0 && idleNow > skip) return;
+    const focused = idleNow > FOCUS_IDLE_MS;
+    if (focused && !(await this.focusWatching(now))) return;
 
     const prev = this.lastLookAt;
     this.lastLookAt = now;
     const streak = this.continuousMinutes();
     const shot = await this.takeShot();
+    const idleNote = `${idleNow < 60_000 ? '刚刚还在动键鼠' : `键鼠有 ${Math.round(idleNow / 60_000)} 分钟没动`}`;
+    const focusNote = focused ? '，不过画面一直在变——他还在看，只是没动手' : '';
     const body =
       `你每隔 ${every} 分钟会看一眼 TA 现在在做什么。这会儿前台是「${current.proc}」` +
       `（窗口标题：${briefTitle(current.title)}），` +
-      `${idleNow < 60_000 ? '刚刚还在动键鼠' : `键鼠有 ${Math.round(idleNow / 60_000)} 分钟没动`}` +
+      idleNote +
+      focusNote +
       (streak > 0 ? `，同一件事已经连着 ${streak} 分钟` : '') +
       `。最近一小时：${this.recentSummary(now)}。` +
       (shot ? '顺手截了一张整个屏幕的图，你自己看。' : '') +
@@ -868,6 +911,7 @@ export class CheckinWorld implements World {
             look: true,
             idleMs: current.idleMs,
             streakMinutes: streak,
+            focused,
           },
         },
         { trigger: 'flush' },
@@ -989,7 +1033,12 @@ export class CheckinWorld implements World {
       lookDueIn: this.lookEveryMinutes() > 0 && this.lastLookAt
         ? Math.max(0, Math.round((this.lastLookAt + this.lookEveryMinutes() * 60_000 - now) / 60_000))
         : 0,
-      idleSkipMinutes: this.idleSkipMinutes(),
+      focusIdleMinutes: FOCUS_IDLE_MS / 60_000,
+      stillMinutes: STILL_WINDOW_MS / 60_000,
+      // 键鼠停着时它凭什么判断「他还在看」：画面有没有在变
+      screenChanging: this.lastChangeAt ? now - this.lastChangeAt <= STILL_WINDOW_MS : null,
+      lastChangeAt: this.lastChangeAt ? new Date(this.lastChangeAt).toISOString() : null,
+      printAt: this.printAt ? new Date(this.printAt).toISOString() : null,
       limits: lim,
       saidToday: soft.day === this.dayKey(now) ? soft.count : 0,
       saidLastHour: this.store.countSince(now, 60 * 60_000),

@@ -17,8 +17,6 @@ export const CHECKIN_DEFAULTS = {
   sameAppMinutes: 90,
   /** 另一条给由头的路：每隔多久主动看一眼屏幕（分钟）；0 = 关掉 */
   lookEveryMinutes: 30,
-  /** 键鼠停着超过多久就不给由头（分钟）；0 = 不判，只看离开判定 */
-  idleSkipMinutes: 5,
   /** 两条搭话之间至少隔多久（分钟），被无视会自动翻倍；0 = 不设间隔 */
   softGapMinutes: 90,
   /** 一小时内最多几条；0 = 不限 */
@@ -53,7 +51,6 @@ export interface CheckinConfigSection {
   quietTo: string;
   sameAppMinutes: number;
   lookEveryMinutes: number;
-  idleSkipMinutes: number;
   softGapMinutes: number;
   softPerHour: number;
   softPerDay: number;
@@ -128,15 +125,6 @@ export function checkinConfigGroups(language: Language): ConfigGroup[] {
             'x-hot': true,
             'x-suffix': MINUTE,
             description: t.lookDescription,
-          },
-          'worlds.checkin.idleSkipMinutes': {
-            type: 'integer',
-            title: t.idleSkipTitle,
-            minimum: 0,
-            maximum: 240,
-            'x-hot': true,
-            'x-suffix': MINUTE,
-            description: t.idleSkipDescription,
           },
         },
       },

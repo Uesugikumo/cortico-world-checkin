@@ -24,8 +24,6 @@ export interface CheckinText {
   sameAppDescription: string;
   lookTitle: string;
   lookDescription: string;
-  idleSkipTitle: string;
-  idleSkipDescription: string;
   softGapTitle: string;
   softGapDescription: string;
   softPerHourTitle: string;
@@ -82,8 +80,6 @@ const ZH: CheckinText = {
   sameAppDescription: '一直在同一个窗口前待够这么久，才会递一个由头。可调小，代价是更容易被小事打断。',
   lookTitle: '看一眼屏幕',
   lookDescription: '另一种给由头的方式：不管换没换窗口，每隔这么久主动看一眼你屏幕，让它知道你现在在做什么。0 = 关掉，只按上面的「持续」给。',
-  idleSkipTitle: '键鼠不动就不给',
-  idleSkipDescription: '你人还在这台电脑前、只是键鼠停了一会儿时，它照样会递由头，正文写着「键鼠有 N 分钟没动」——那是看不清你到底在不在的信号，最容易说错话。填上几分钟：键鼠停着超过这么久就不递（看片时放宽一倍）。0 = 不判，仍按「离开判定」来。',
   softGapTitle: '两条之间至少隔',
   softGapDescription: '被无视会自动翻倍，最多八倍。0 = 不设间隔，但退避仍按 5 分钟起算。',
   softPerHourTitle: '每小时最多',
@@ -141,8 +137,6 @@ const EN: CheckinText = {
   sameAppDescription: 'Only after staying in the same window this long does it offer a reason to speak. Lower means more interruptions.',
   lookTitle: 'Timed glance at the screen',
   lookDescription: 'A second way to get a cue: regardless of window switches, take a look every so often so it knows what you are doing. 0 = off, leaving only the stay-for cue above.',
-  idleSkipTitle: 'Skip when the mouse is still',
-  idleSkipDescription: 'You are still at the computer but the mouse/keyboard has been quiet for a while — a cue at that moment carries "no input for N minutes", which is the hardest signal to read. Set how many minutes: once input is idle longer than this, no cue is pushed (doubled while watching video). 0 = no check, rely on the away threshold only.',
   softGapTitle: 'Gap between check-ins',
   softGapDescription: 'Doubles when ignored, up to eight times. 0 = no minimum gap (backoff still starts from 5 minutes).',
   softPerHourTitle: 'Max per hour',

@@ -90,5 +90,7 @@ export const CHECKIN: WorldDefinition<CheckinConfigSection> = {
       cfg: ctx.cfg,
       timezone: ctx.timezone,
       persist: ctx.persist,
+      // 只有测试会在 ctx 上塞一个假的「画面指纹」，框架不传这个字段
+      print: (ctx as { print?: () => Promise<Uint8Array | null> }).print,
     }),
 };

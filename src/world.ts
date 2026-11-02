@@ -189,8 +189,8 @@ export class CheckinWorld implements World {
         ? `陪着看 ${this.companionMinutes()} 分钟，每 ${Math.round(this.companionEveryMs() / 60_000)} 分钟递一眼（一共 ${this.companionTotal()} 眼，第一眼带 speak）`
         : '连着摸你两下已经关掉了，收不到这种陪伴',
       'checkin.look': this.lookEveryMinutes() > 0
-        ? `另外每隔 ${this.lookEveryMinutes()} 分钟会主动看一眼 TA 现在在做什么，不管窗口换没换`
-        : '「按时间看一眼屏幕」这种由头关着，只有同一个程序待久了才给',
+        ? `不管窗口有没有换，每隔 ${this.lookEveryMinutes()} 分钟会主动看一眼 TA 现在在做什么`
+        : '「按时间看一眼屏幕」关着，只有同一个程序待久了才给由头',
     };
     // 0.1.7 及以前发布的是下划线名；这一版仍留别名，别人改过自己的 ENV_PROMPT 也不会渲染出裸的 {{…}}。
     // 计划 0.2.0 删掉——新写的模板一律用点号，下面这些别名不进 promptDocs.vars、也不出现在任何文档里。

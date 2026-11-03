@@ -41,6 +41,16 @@ export const CHECKIN_DEFAULTS = {
   backNudge: true,
   /** 提醒过一次的跟进，过多久还没结果就自己清掉（分钟） */
   staleMinutes: 60,
+  /** 人不在的时候，桌宠冒出来的话抄一份到 QQ */
+  relayAway: false,
+  /** 不管人在不在，桌宠冒出来的话全抄一份到 QQ */
+  relayAlways: false,
+  /** 抄到哪个号；留空 = 最近一次跟我私聊的那个号 */
+  relayTarget: '',
+  /** 本机 OneBot 的 HTTP 地址（SnowLuma / NapCat 都是这个形状） */
+  relayApi: 'http://127.0.0.1:3000',
+  /** OneBot HTTP 的 access token；留空 = 不带鉴权 */
+  relayToken: '',
 } as const;
 
 /** config.json 的 `worlds.checkin` 节。 */
@@ -63,6 +73,11 @@ export interface CheckinConfigSection {
   awayMinutes: number;
   backNudge: boolean;
   staleMinutes: number;
+  relayAway: boolean;
+  relayAlways: boolean;
+  relayTarget: string;
+  relayApi: string;
+  relayToken: string;
 }
 
 /** 单位都走 `x-suffix`，标题里就不再写「（分钟）」这类后缀了。 */
@@ -242,6 +257,44 @@ export function checkinConfigGroups(language: Language): ConfigGroup[] {
             title: t.quietToTitle,
             'x-hot': true,
             description: t.quietToDescription,
+          },
+        },
+      },
+    },
+    {
+      id: 'world:checkin.relay',
+      owner,
+      schema: {
+        type: 'object',
+        title: t.groupRelayTitle,
+        description: t.groupRelayDescription,
+        properties: {
+          'worlds.checkin.relayAway': {
+            type: 'boolean',
+            title: t.relayAwayTitle,
+            'x-hot': true,
+            description: t.relayAwayDescription,
+          },
+          'worlds.checkin.relayAlways': {
+            type: 'boolean',
+            title: t.relayAlwaysTitle,
+            'x-hot': true,
+            description: t.relayAlwaysDescription,
+          },
+          'worlds.checkin.relayTarget': {
+            type: 'string',
+            title: t.relayTargetTitle,
+            description: t.relayTargetDescription,
+          },
+          'worlds.checkin.relayApi': {
+            type: 'string',
+            title: t.relayApiTitle,
+            description: t.relayApiDescription,
+          },
+          'worlds.checkin.relayToken': {
+            type: 'string',
+            title: t.relayTokenTitle,
+            description: t.relayTokenDescription,
           },
         },
       },

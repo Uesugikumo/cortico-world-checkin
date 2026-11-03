@@ -7,6 +7,7 @@ import type { BlobInput, ToolDef, World, WorldHost, WorldLamp, WorldWebUiDecl } 
 import { briefTitle, isSelfApp, isWatchingVideo, sampleForeground, type Sample } from './activity.ts';
 import { checkinConfigGroups, type CheckinConfigSection } from './config.ts';
 import { capturePrint, captureScreen, changedRatio } from './shot.ts';
+import { QqRelay } from './relay.ts';
 import { ThreadStore, type Thread } from './store.ts';
 import { text } from './strings.ts';
 
@@ -121,6 +122,8 @@ export class CheckinWorld implements World {
 
   private readonly deps: Deps;
   private readonly store: ThreadStore;
+  /** 桌宠说的话抄一份到 QQ（只连本机 OneBot，见 relay.ts） */
+  private readonly relay: QqRelay;
   private host: WorldHost | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private pokeTimer: ReturnType<typeof setInterval> | null = null;
@@ -174,6 +177,7 @@ export class CheckinWorld implements World {
     this.deps = deps;
     mkdirSync(deps.dataDir, { recursive: true });
     this.store = new ThreadStore(join(deps.dataDir, 'threads.json'));
+    this.relay = new QqRelay(join(deps.dataDir, 'relay.json'), (m) => this.host?.log.warn(m));
   }
 
   private get cfg(): CheckinConfigSection {
@@ -360,6 +364,7 @@ export class CheckinWorld implements World {
     }
     this.disarmTimers();
     this.host = null;
+    this.relay.save();
     this.store.save();
   }
 
@@ -905,6 +910,15 @@ export class CheckinWorld implements World {
 
     // 陪伴不看安静时段：是他自己摸出来的，有内容就递。
     await this.tickCompanion(host, now);
+
+    // 桌宠冒出来的话抄一份到 QQ：两个开关任一开着才抄，其中「离开才转」那档看 awaySince。
+    // 安静时段一律不抄：那头是手机，半夜响一声比少收几句话难受。
+    await this.relay.pump(
+      host,
+      this.cfg,
+      !quiet && (this.cfg.relayAlways === true || (this.cfg.relayAway === true && this.awaySince !== null)),
+      now,
+    );
   }
 
   /**

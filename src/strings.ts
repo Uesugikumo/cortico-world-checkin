@@ -54,6 +54,18 @@ export interface CheckinText {
   panelProbeDescription: string;
   panelPendingTitle: string;
   panelPendingDescription: string;
+  groupRelayTitle: string;
+  groupRelayDescription: string;
+  relayAwayTitle: string;
+  relayAwayDescription: string;
+  relayAlwaysTitle: string;
+  relayAlwaysDescription: string;
+  relayTargetTitle: string;
+  relayTargetDescription: string;
+  relayApiTitle: string;
+  relayApiDescription: string;
+  relayTokenTitle: string;
+  relayTokenDescription: string;
 }
 
 const ZH: CheckinText = {
@@ -111,6 +123,19 @@ const ZH: CheckinText = {
   panelProbeDescription: '它现在看到的画面、采样间隔、今天说了几条，都在这页；整页只读。',
   panelPendingTitle: '待跟进',
   panelPendingDescription: '它记着以后要回头问的事：到点会自己提，这里可以先看，也可以直接结掉。提醒过一次、之后一直没有结果的会自动清掉，清多久也算在这页。',
+  groupRelayTitle: '转 QQ',
+  groupRelayDescription:
+    '桌宠冒出来的话，抄一份发到你 QQ 上。读的是桌宠自己记的对话，不经过模型的工具调用，所以它绕不开。只连本机，不出网。',
+  relayAwayTitle: '人不在就转 QQ',
+  relayAwayDescription: '判定成「人不在电脑前」的时候，桌宠说的话抄一份发到 QQ；人在的时候不转。',
+  relayAlwaysTitle: '一直都转 QQ',
+  relayAlwaysDescription: '不管人在不在，桌宠说的每一句都抄一份到 QQ。桌宠关着的时候没有气泡，也就没得转。',
+  relayTargetTitle: '发到哪个号',
+  relayTargetDescription: '填 QQ 号。留空就用「最近一次跟你私聊」的那个号，最省事。',
+  relayApiTitle: 'OneBot 地址',
+  relayApiDescription: '本机 OneBot 的 HTTP 地址（SnowLuma / NapCat 都是这个形状），默认 http://127.0.0.1:3000。不走 WS，不会挤掉宿主自己的 QQ 连接。',
+  relayTokenTitle: 'OneBot 令牌',
+  relayTokenDescription: 'HTTP 接口的 access token（在 OneBot 配置里），留空就不带鉴权。',
 };
 
 const EN: CheckinText = {
@@ -168,6 +193,19 @@ const EN: CheckinText = {
   panelProbeDescription: 'What it sees right now, the sampling interval, and how much it has said today — read only.',
   panelPendingTitle: 'Pending follow-ups',
   panelPendingDescription: 'Things it means to ask you about later: raised when due. See them here, or close them now. One that was raised once and never resolved clears itself after a while — how long is set on this page.',
+  groupRelayTitle: 'Forward to QQ',
+  groupRelayDescription:
+    'Copies what the pet says over to your QQ. It reads the pet own chat log instead of tool calls, so going around the tools still lands here. Local only.',
+  relayAwayTitle: 'Forward while I am away',
+  relayAwayDescription: 'When you count as away from the keyboard, bubbles are also sent to QQ. Nothing is forwarded while you are at the desk.',
+  relayAlwaysTitle: 'Forward everything',
+  relayAlwaysDescription: 'Every bubble goes to QQ, whether you are away or not. With the pet closed there are no bubbles to forward.',
+  relayTargetTitle: 'Send to',
+  relayTargetDescription: 'A QQ number. Leave it empty to use the last person you chatted with privately.',
+  relayApiTitle: 'OneBot endpoint',
+  relayApiDescription: 'HTTP address of a local OneBot implementation (SnowLuma / NapCat), default http://127.0.0.1:3000. No WS, so the host own QQ link stays untouched.',
+  relayTokenTitle: 'OneBot token',
+  relayTokenDescription: 'access token of the HTTP endpoint (from the OneBot config). Empty means no auth.',
 };
 
 export function text(language: Language): CheckinText {

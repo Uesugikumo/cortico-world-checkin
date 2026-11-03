@@ -1,4 +1,5 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Language } from 'cortico/core/language.ts';
@@ -17,6 +18,15 @@ const TICK_MS = 30_000;
 const SAMPLES_MAX = 240;
 /** 多久评估一次「要不要搭一句话」 */
 const EVAL_MS = 15 * 60_000;
+/**
+ * 人不在的时候，采样随离开时长放档。
+ * 一小时以内按设置原速：这段基本都是吃饭、短会、下楼，回来那一刻最要紧；
+ * 一到三小时两分钟一次；超过三小时五分钟一次（多半是睡了或者出门了）。
+ */
+const AWAY_TIER2_MIN = 60;
+const AWAY_TIER3_MIN = 180;
+const AWAY_STEP2_MS = 2 * 60_000;
+const AWAY_STEP3_MS = 5 * 60_000;
 /** 挨无视后最多退避到几倍间隔 */
 const IGNORED_MAX = 3;
 /** 「两条之间至少隔多久」填 0 时，退避就没有基数了，用这个兜底 */
@@ -41,8 +51,27 @@ const MAX_PENDING = 20;
 const SPEAK_RE = /\[(typed|voice|answer)\]/;
 /** 桌宠被戳时它自己推的事件；我们只认「戳」这一种 */
 const POKE_TYPE = 'desktop-pet.touch';
-/** 多快看一眼有没有被戳 */
-const POKE_POLL_MS = 1_000;
+/**
+ * 多快看一眼有没有被戳。定成 2.5 秒：这个间隔比连戳的合并窗口（POKE_DOUBLE_MS = 3.5 秒）短，
+ * 相邻两次轮询必定落在同一个窗口内，连戳不会因为轮询变慢被拆散；
+ * 再快只是纯烧事件库查询，手感没有区别。
+ */
+const POKE_POLL_MS = 2_500;
+/**
+ * 桌宠自己的本地 HTTP 口默认值。它被占了会从 base 往后试，所以探测要扫一段。
+ * 桌宠没挂载时这个口根本不会 listen（它的 start() 才绑），关掉端口就没了——正好当它在不在的探针。
+ */
+const PET_PORT_DEFAULT = 7797;
+/** 桌宠最多往后试几个口（它自己 PORT_ATTEMPTS = 10），扫这么多足够 */
+const PET_PORT_SPAN = 10;
+/** 单次探测的连接上限；本机端口拒连是即时的，这个只防呆 */
+const PET_PROBE_TIMEOUT_MS = 400;
+/** 确认桌宠还在不在的常规间隔 */
+const PET_CHECK_MS = 60_000;
+/** 刚启动、刚探丢时走快档：两个 World 谁先挂说不准，连探几次再下结论 */
+const PET_FAST_MS = 5_000;
+/** 快档探这么多次都没有，才认定桌宠不在、把活停了 */
+const PET_CONFIRM_TRIES = 5;
 /** 连戳两下才算数：两下之间最多隔这么久（再慢就当两次各自的心血来潮） */
 const POKE_DOUBLE_MS = 3_500;
 /** 说了一句之后，这么久之内再戳也不再开口 */
@@ -95,6 +124,12 @@ export class CheckinWorld implements World {
   private host: WorldHost | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private pokeTimer: ReturnType<typeof setInterval> | null = null;
+  /** 确认桌宠在不在的定时器（单次 setTimeout 自己接力，方便换节奏） */
+  private petTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 桌宠在不在：没确认之前先当成在，免得启动瞬间白停一次 */
+  private petPresent = true;
+  /** 连着几次没探到桌宠；快档阶段靠它决定要不要继续试 */
+  private petMiss = 0;
   private pokeCursor: number | null = null;
   /** 这一小段时间里数到了几下戳：攒够两下才说话 */
   private pokeSeen = 0;
@@ -111,6 +146,8 @@ export class CheckinWorld implements World {
   private companionCount = 0;
   private samples: Sample[] = [];
   private lastSampleAt = 0;
+  /** 上一跳是不是在安静时段；用来认出「刚出来」，好把整夜没看的账清掉 */
+  private wasQuiet = false;
   private lastEvalAt = 0;
   /** 上一次按「看一眼屏幕」给由头是什么时候；0 = 还没给过 */
   private lastLookAt = 0;
@@ -279,19 +316,14 @@ export class CheckinWorld implements World {
           role: 'envPrompt',
           // 声明了 vars，控制台的提示词页才会列出变量、能看当前值、能「预览变量」；
           // 不声明就只有一屏裸 {{…}}。
+          // 声明了 vars，控制台的提示词页才会列出变量、能看当前值、能「预览变量」；
+          // 不声明就只有一屏裸 {{…}}。现在模板只用到这 4 个（其余值仍在 envPromptVars() 里，
+          // 想用哪个把名字挪进来即可）。
           vars: [
             { name: 'checkin.now', description: zh ? '拼这段前缀时的本地钟点。' : 'Local time when this prefix was assembled.' },
             { name: 'checkin.quiet', description: zh ? '安静时段；这段时间里它不会主动搭话。' : 'Quiet hours; it never speaks up during this window.' },
             { name: 'checkin.pending', description: zh ? '还挂着的跟进条数。' : 'How many follow-ups are still open.' },
             { name: 'checkin.watch', description: zh ? '有没有在观察前台窗口。' : 'Whether foreground windows are being watched.' },
-            { name: 'checkin.limits', description: zh ? '一天/每小时上限、两条之间的最短间隔、同一个程序的门槛。' : 'Daily and hourly caps, the minimum gap, and the per-app threshold.' },
-            { name: 'checkin.away', description: zh ? '离开的判定（分钟，看视频放宽一倍）和走久了递由头的口径；要不要在 QQ 上问、问给谁，交给模型自己找。' : 'How absence is judged (doubled while watching video) and what the cue says; whether to ask on QQ and who to ask is up to the model.' },
-            { name: 'checkin.stale', description: zh ? '提醒过一次、一直没有结果的跟进，过多少分钟自动销账。' : 'How long an asked, still unanswered follow-up stays before it is swept.' },
-            { name: 'checkin.backGap', description: zh ? '两次「回来时说一句」之间至少隔多久。' : 'Minimum gap between two welcome-back lines.' },
-            { name: 'checkin.awayVerdict', description: zh ? '递出「他走久了」之后，等多久还没落账就补一条只记账、不许开口的收尾（固定 20 分钟，只补一次）。' : 'After the away cue, how long to wait for a recorded verdict before sending one record-only nudge (fixed at 20 minutes, sent once).' },
-            { name: 'checkin.companion', description: zh ? '连摸两下之后陪多久、隔多久递一眼、一共几眼。' : 'How long the post-pet company lasts, how often a glance arrives, and how many glances in total.' },
-            { name: 'checkin.look', description: zh ? '「按时间看一眼屏幕」这种由头的间隔；关掉时这里会写明只有程序待久了才给。' : 'Interval of the timed screen glance cue; when off, this says only the stay-in-one-app cue remains.' },
-            { name: 'checkin.focus', description: zh ? '键鼠停着时怎么判断他还在不在看：看画面有没有在变，以及停住多久才算真不在。' : 'How it tells whether he is still watching while the mouse is idle: by whether the screen keeps changing, and how long a frozen screen counts as gone.' },
           ],
         },
       ],
@@ -300,24 +332,111 @@ export class CheckinWorld implements World {
 
   async start(host: WorldHost): Promise<void> {
     this.host = host;
-    // 「按时间看一眼」从启动那一刻开始计时：刚打开就递一眼没有意义，等满一个间隔再说
-    this.lastLookAt = Date.now();
-    this.timer = setInterval(() => {
-      void this.tick();
-    }, TICK_MS);
-    // 定时器不该把进程钉住不让退出
-    this.timer.unref?.();
+
+    // 只适配 Windows：前台窗口、键鼠空闲、整屏截图、画面指纹全压在 Win32 API 和 PowerShell 上，
+    // 桌宠本身也只有 Windows 版。别的平台上装了也做不了事，直接不启动。
+    // （package.json 里 `"os": ["win32"]` 已经在安装这一步拦住正常路径，这里是手动放进扩展目录时的兜底。）
+    if (process.platform !== 'win32') {
+      host.log.warn(`checkin: 只适配 Windows（本机 ${process.platform}），模块不启动`);
+      return;
+    }
 
     host.log.info(
       `checkin: ${this.cfg.watchActivity ? '看前台窗口' : '只看跟进'}；安静 ${this.cfg.quietFrom}–${this.cfg.quietTo}；` +
         `挂着 ${this.store.pending().length} 条`,
     );
 
-    // 连戳两下是打招呼，连摸两下是陪着看一会儿；两件都跟「要不要监测前台窗口」没关系，各有开关。
-    if (this.cfg.pokeNudge || this.companionEnabled()) this.startPokeWatch(host);
+    this.armTimers(host);
+
+    // 桌宠关掉以后，这里的每一样活都没有落点了：说话靠它的气泡，连戳连摸靠它的事件，
+    // 而「搭一句话」「看一眼屏幕」本来就是为了喂它。所以盯住它：不在就全停，回来再接着干。
+    this.startPetWatch();
   }
 
   async stop(): Promise<void> {
+    if (this.petTimer) {
+      clearTimeout(this.petTimer);
+      this.petTimer = null;
+    }
+    this.disarmTimers();
+    this.host = null;
+    this.store.save();
+  }
+
+  // ---------- 桌宠在不在 ----------
+
+  /**
+   * 定时确认桌宠还活着。桌宠一停，这里的活就全都没有落点了：
+   * 说话靠它的气泡，连戳连摸靠它的事件，而「搭一句话」「看一眼屏幕」本来就是喂它的。
+   * 它没挂载时本地口不会 listen（绑口在它自己 start() 里），探不到就说明不在。
+   */
+  private startPetWatch(): void {
+    if (this.petTimer) return;
+    this.schedulePetCheck(0);
+  }
+
+  private schedulePetCheck(delay: number): void {
+    if (this.petTimer) clearTimeout(this.petTimer);
+    this.petTimer = setTimeout(() => {
+      void this.checkPet()
+        .catch(() => {
+          // 探口本身出错就当这一拍没探到，下一拍再来，别把定时链断掉
+        })
+        .finally(() => {
+          if (!this.host) return;
+          // 常规一分钟一次；还在「快档确认」阶段就五秒一次
+          this.schedulePetCheck(this.petPresent && this.petMiss > 0 ? PET_FAST_MS : PET_CHECK_MS);
+        });
+    }, delay);
+    this.petTimer.unref?.();
+  }
+
+  private async checkPet(): Promise<void> {
+    if (!this.host) return;
+    if (await petListening(this.deps.dataDir)) {
+      this.petMiss = 0;
+      if (!this.petPresent) this.resumeAll();
+      return;
+    }
+    if (!this.petPresent) return;
+    // 刚启动时两个 World 谁先挂说不准，先快档多试几次，别一次没探到就把活停了
+    if (++this.petMiss < PET_CONFIRM_TRIES) return;
+    this.suspendAll();
+  }
+
+  /** 摘掉全部定时器：tick、采样、触碰轮询都不再跑。 */
+  private suspendAll(): void {
+    this.petPresent = false;
+    this.disarmTimers();
+    this.host?.log.info('checkin: 桌宠没在跑，把手上的活全停了；它回来我再接着看');
+  }
+
+  /** 桌宠回来了：重建定时器。 */
+  private resumeAll(): void {
+    const host = this.host;
+    if (!host) return;
+    this.petPresent = true;
+    host.log.info('checkin: 桌宠回来了，接着看');
+    this.armTimers(host);
+  }
+
+  /** 挂上调度：30 秒一跳，加（按配置）盯触碰。 */
+  private armTimers(host: WorldHost): void {
+    if (!this.timer) {
+      // 「按时间看一眼」从挂上的那一刻开始计时：刚打开就递一眼没有意义，等满一个间隔再说
+      this.lastLookAt = Date.now();
+      this.timer = setInterval(() => {
+        void this.tick();
+      }, TICK_MS);
+      // 定时器不该把进程钉住不让退出
+      this.timer.unref?.();
+    }
+    // 连戳两下是打招呼，连摸两下是陪着看一会儿；两件都跟「要不要监测前台窗口」没关系，各有开关。
+    // 也不受安静时段管：这两样是他自己上门来找的，不是扩展主动开的口。
+    if (this.cfg.pokeNudge || this.companionEnabled()) this.startPokeWatch(host);
+  }
+
+  private disarmTimers(): void {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -326,8 +445,6 @@ export class CheckinWorld implements World {
       clearInterval(this.pokeTimer);
       this.pokeTimer = null;
     }
-    this.host = null;
-    this.store.save();
   }
 
   // ---------- 连戳两下 ----------
@@ -414,11 +531,11 @@ export class CheckinWorld implements World {
       `${isWatchingVideo(sample.proc, sample.title) ? '（看着片子）' : ''}。`;
     const body =
       '使用者连着戳了两下桌宠（就是戳你）。' +
-      (look.selfNow ? '他戳完还没切回原来的窗口，这会儿前台是我自己，' + '所以下面这一眼是戳之前的样子：' : '我顺手看了一眼他这会儿在做什么：') +
+      (look.selfNow ? '他戳完还没切回原来的窗口，这会儿前台是我自己，' + '所以下面这一眼是戳之前的样子：' : '我看了一眼他这会儿在做什么：') +
       eye +
       (streak > 0 ? `同一件事已经连着 ${streak} 分钟了。` : '') +
       (shot ? '截了一张图，你自己看。' : '') +
-      '他连戳两下多半是想听你说句话（也可能只是手欠）；说一句，一两行。';
+      '他连戳两下多半是想听你说句话；说一句，一两行。';
     await host.pushEvent(
       {
         type: 'checkin.activity',
@@ -511,7 +628,12 @@ export class CheckinWorld implements World {
       (look.selfNow ? '他摸完还没切回原来的窗口，这会儿前台是我自己，所以下面这一眼是摸之前的样子：' : '') +
       where +
       (shot ? '截了一张图，你自己看。' : '') +
-      '不用每眼都开口：看到有意思的、他明显在跟你玩、或者他卡在那儿了，再搭一句（气泡，一两行）；其余时候看完就放着。';
+      // 宿主只有「可以开口」(tags: ['speak'])，没有「必须开口」这种标签，
+      // 所以第一眼的「必须说一句」只能落在正文里，后面几眼才是「可以不说」。
+      (index === 1
+        ? '这是第一眼，必须说一句（气泡，一两行）。'
+        : '不用每眼都开口：看到有意思的、他明显在跟你玩、或者他卡在那儿了，再搭一句（气泡，一两行）；其余时候看完就放着。') +
+      '想接着看就用 `checkin_activity` 再问一眼；截不到图或者人不在，就说一声让他再摸摸你。';
     try {
       await host.pushEvent(
         {
@@ -632,19 +754,19 @@ export class CheckinWorld implements World {
     // 这时候屏幕上多半是锁屏，截了也没用，还白费 token，所以不带图。
     const body =
       `使用者已经离开电脑${spent}了（走之前前台是「${sample.proc || '（不知道）'}」）。` +
-      '「离开」只说明他人不在这台电脑前，别处有没有跟你说过话不算数——他要是在 QQ 上回了你，' +
-      '那正好说明人还在外面，不是回来了。\n' +
+      '这条只说人不在电脑前：他就算刚在 QQ 上回过你，也不算回来，照常按下面来。\n' +
       '现在先自己想他去了哪：翻一下对话，他走之前有没有交代过（「我出去一趟」「先睡会儿」）；' +
       '再看一眼工具列表里有没有课程表、日程表这类东西（有就查一句，没有就跳过），这会儿他是不是本来就有课、有自习、有安排。\n' +
       '先分清「知道」和「猜」：他走前交代过（「我出去一趟」「先去吃饭」），或者课程表、日程表里查得到，才算知道；' +
       '按「这个点该吃饭了」「这么晚一般睡了」推出来的，都是猜，不算数。\n' +
       '知道就按知道的来，不用问：本来在上课/有事，人不在是正常的，别说「人呢」「翘课了」这种话，' +
       '等他回来再顺口说一句「下课啦」就够。\n' +
-      '只有猜、或者什么都不知道：回来问一句「刚才去哪儿啦」就够，不用非得发到手机上；真要现在问，' +
-      '就自己看一眼工具列表里有没有能把话送到手机上的东西（QQ 那边的发送工具、别的通知渠道都算；名字别猜，' +
-      '没有就是没装），有的话优先发给他本人，别往群里发，一两句，别追问、别连着发第二条。\n' +
+      '只有猜、或者什么都不知道：就现在去问，就自己看一眼工具列表里有没有能把话送到手机上的东西' +
+      '（QQ 那边的发送工具、别的通知渠道都算；名字别猜，没有就是没装），有的话优先发给他本人，' +
+      '别往群里发，一两句，别追问、别连着发第二条。\n' +
       '不管问不问，这一步都要收尾：用 `checkin_note` 记一条。问过了记「等他回」，先别 `checkin_done`，' +
-      '等他真答了再结；查到事实的记「日程：…」；只是猜的就记「猜的：估计去吃饭了，还没问，回来问一句」——' +
+      '等他真答了再结；查到事实的记「日程：…」；没问到，只是猜的就记' +
+      '「没问到，猜的：估计去吃饭了，还没问，回来问一句」——' +
       '猜的不算结论，这条照样挂在待跟进里，别现在结掉。记了我就不再来问你这趟的事了。';
     try {
       await host.pushEvent(
@@ -681,9 +803,9 @@ export class CheckinWorld implements World {
     const body =
       `使用者已经离开 ${minutes} 分钟了，上一趟你还没有收尾。` +
       '**这条不要开口，也不要给 TA 发任何消息**，只做一件事：用 `checkin_note` 写下你的结论。' +
-      '他走前说过、或者日程里查得到的，就写事实；只是按时间、按习惯猜的，就写「猜的：估计去吃饭了，还没问」——' +
-      '猜的不算结论，留着回来问过再结，别现在 `checkin_done`。' +
-      '记完这趟就算完了，我不会再问你。';
+      '他走前说过、或者日程里查得到的，就写事实；没问到，只是按时间、按习惯猜的，就写' +
+      '「没问到，猜的：估计去吃饭了，还没问」——' +
+      '猜的不算结论，留着回来问过再结，别现在 `checkin_done`。记完这趟就算完了。';
     try {
       await host.pushEvent(
         {
@@ -740,7 +862,10 @@ export class CheckinWorld implements World {
   private async tick(): Promise<void> {
     const host = this.host;
     if (!host) return;
+    // 桌宠不在时定时器已经摘了；这条是防「摘之前那一跳正好还在路上」
+    if (!this.petPresent) return;
     const now = Date.now();
+    const quiet = this.inQuiet(now);
     this.store.rollDay(this.dayKey(now));
 
     // 提醒过还没结果的，留一阵就自己清掉；不然列表会一直挂着过去的事
@@ -749,37 +874,68 @@ export class CheckinWorld implements World {
       host.log.info(`checkin: 清掉 ${stale.length} 条过期的跟进`);
     }
 
+    // 安静时段的优先级最高：进出这个窗口都是「全停 / 全恢复」，不只是采样
+    if (this.wasQuiet !== quiet) {
+      if (quiet) this.enterQuiet();
+      else this.leaveQuiet(host);
+    }
+
     // 到点的跟进：安静时段先不吵，等出来再说；人不在也先攒着，等他回来再提
-    if (!this.inQuiet(now) && this.awaySince === null) {
+    if (!quiet && this.awaySince === null) {
       for (const th of this.store.due(now)) this.pushDue(host, th, now);
     }
 
+    // 安静时段一次都不采：这段时间不推任何东西，采了也没用处，白烧一个 powershell
     if (this.cfg.watchActivity) {
-      const every = Math.max(15, this.cfg.sampleSeconds) * 1000;
-      if (!this.lastSampleAt || now - this.lastSampleAt >= every) {
+      const every = this.sampleEvery(quiet);
+      if (every > 0 && (!this.lastSampleAt || now - this.lastSampleAt >= every)) {
         await this.sampleNow();
       }
     }
 
-    if (!this.inQuiet(now)) await this.maybeLook(host, now);
+    if (!quiet) await this.maybeLook(host, now);
 
-    if (!this.inQuiet(now) && now - this.lastEvalAt >= EVAL_MS) {
+    if (!quiet && now - this.lastEvalAt >= EVAL_MS) {
       this.lastEvalAt = now;
       await this.maybeNudge(host, now);
     }
 
     // 递过「他走久了」但一直没落账的，补一次收尾（只记账、不开口）
-    if (!this.inQuiet(now)) await this.nagAwayVerdict(now);
+    if (!quiet) await this.nagAwayVerdict(now);
 
     // 陪伴不看安静时段：是他自己摸出来的，有内容就递。
     await this.tickCompanion(host, now);
+  }
+
+  /**
+   * 进安静时段：采样和主动搭话全停。
+   * 连戳、连摸是他自己上门的，不在这条线上——游标和陪伴状态都留着，整夜摸也不会被吞掉。
+   */
+  private enterQuiet(): void {
+    this.wasQuiet = true;
+  }
+
+  /**
+   * 出安静时段：账本不能接着用——他半夜回来过的话，这会儿不该补一句「回来啦」。
+   * 清完立刻重采一次：走没走由 idleMs 自己说，不拿这段空白去推。
+   */
+  private leaveQuiet(host: WorldHost): void {
+    this.wasQuiet = false;
+    this.awaySince = null;
+    this.awayAsked = false;
+    this.awayAt = null;
+    this.awayNagged = false;
+    this.lastSampleAt = 0;
+    // 触碰轮询整夜没停过，这里再挂一次是幂等的（startPokeWatch 自己有 guard）
+    if (this.cfg.pokeNudge || this.companionEnabled()) this.startPokeWatch(host);
   }
 
   private pushDue(host: WorldHost, thread: Thread, now: number): void {
     if (!this.store.markAsked(thread.id, now)) return;
     const body =
       `我自己记着的一件事到点了：${thread.text}。现在 ${this.clockText(now)}。` +
-      '要问就现在问一句。';
+      '用平时的口吻顺带问一句（比如「快四点了，忙完了？」）。他这会儿可能正忙、或者刚说完话，' +
+      '那就先别提，等闲下来再顺口说。';
     void host
       .pushEvent(
         {
@@ -840,7 +996,7 @@ export class CheckinWorld implements World {
       `（窗口标题：${briefTitle(current.title)}）。最近一小时：${this.recentSummary(now)}。` +
       focusNote +
       (shot ? '顺手截了一张图，你自己看。' : '') +
-      '要是这会儿有句短的想说，就说出来（气泡，一两行）；说完回去接着干你的。';
+      '要是这会儿有句短的想说，就说出来（气泡，一两行）；像旁边的人那样说，别用监控口径。';
 
     this.store.rollDay(day);
     this.store.markSoft(day, now, ignored);
@@ -899,7 +1055,7 @@ export class CheckinWorld implements World {
       (streak > 0 ? `，同一件事已经连着 ${streak} 分钟` : '') +
       `。最近一小时：${this.recentSummary(now)}。` +
       (shot ? '顺手截了一张整个屏幕的图，你自己看。' : '') +
-      '看一眼就知道他在忙什么了：想说句短的就这会儿说（气泡，一两行），没想说的就当没这一眼。';
+      '看一眼就知道他在忙什么了：想说句短的就这会儿说（气泡，一两行）；别问「你在干嘛呢」，就着眼前这件事说。';
 
     try {
       await host.pushEvent(
@@ -929,6 +1085,21 @@ export class CheckinWorld implements World {
   // ---------- 手动看一眼（面板） ----------
 
   /** 立刻采一次前台窗口，不看采样间隔。 */
+  /**
+   * 这一拍该隔多久采一次；0 = 这一拍不采。
+   * 安静时段优先级最高，一次都不采；人不在时按离开时长放档（见 AWAY_TIER*）。
+   */
+  private sampleEvery(quiet: boolean): number {
+    if (quiet) return 0;
+    const sec = Number(this.cfg.sampleSeconds);
+    const base = Math.max(15, Number.isFinite(sec) ? sec : 60) * 1000;
+    if (this.awaySince === null) return base;
+    const awayMin = (Date.now() - this.awaySince) / 60_000;
+    if (awayMin >= AWAY_TIER3_MIN) return Math.max(AWAY_STEP3_MS, base);
+    if (awayMin >= AWAY_TIER2_MIN) return Math.max(AWAY_STEP2_MS, base);
+    return base;
+  }
+
   private async sampleNow(): Promise<Sample | null> {
     if (!this.cfg.watchActivity) return null;
     this.lastSampleAt = Date.now();
@@ -1378,6 +1549,48 @@ export class CheckinWorld implements World {
       return false;
     }
   }
+}
+
+/**
+ * 桌宠在不在：探它的本地口。
+ * 它的 HTTP 服务只在桌宠挂载时 start() 里 listen，停用/关窗/崩了这个口就没人接，
+ * connect 会立刻拒连——这比「配置里写着 enabled」可靠得多（配置和进程会不一致）。
+ */
+async function petListening(dataDir: string): Promise<boolean> {
+  const open = await Promise.all(petPorts(dataDir).map((port) => portOpen(port)));
+  return open.some(Boolean);
+}
+
+/** 桌宠的候选口：配置里写的那个（读不到就用默认值）往后扫一段，它会自己往后挪。 */
+function petPorts(dataDir: string): number[] {
+  let base = PET_PORT_DEFAULT;
+  try {
+    // dataDir 是 <companion>/data，主配置在上一层的 config.json
+    const raw = readFileSync(join(dataDir, '..', 'config.json'), 'utf8');
+    const section = (JSON.parse(raw) as { worlds?: Record<string, { port?: unknown }> }).worlds?.['desktop-pet'];
+    const port = Math.round(Number(section?.port));
+    if (Number.isFinite(port) && port > 1024 && port < 65_536) base = port;
+  } catch {
+    // 配置读不到就按默认口试，不影响判断
+  }
+  return Array.from({ length: PET_PORT_SPAN }, (_, i) => base + i);
+}
+
+/** 摸一下本机端口：连得上就是开着。 */
+function portOpen(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = connect({ host: '127.0.0.1', port });
+    let settled = false;
+    const finish = (open: boolean): void => {
+      if (settled) return;
+      settled = true;
+      sock.destroy();
+      resolve(open);
+    };
+    sock.setTimeout(PET_PROBE_TIMEOUT_MS, () => finish(false));
+    sock.once('connect', () => finish(true));
+    sock.once('error', () => finish(false));
+  });
 }
 
 function parseClock(raw: string, fallback: number): number {

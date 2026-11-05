@@ -34,6 +34,12 @@ export interface CheckinText {
   sampleDescription: string;
   screenshotTitle: string;
   screenshotDescription: string;
+  shotPresetTitle: string;
+  shotPresetDescription: string;
+  shotWidthTitle: string;
+  shotWidthDescription: string;
+  shotQualityTitle: string;
+  shotQualityDescription: string;
   pokeTitle: string;
   pokeDescription: string;
   companionTitle: string;
@@ -73,7 +79,7 @@ const ZH: CheckinText = {
   lampLabel: '运行',
   lampHintWatching: '在跟进挂着的事，也会看前台窗口',
   lampHintOff: '只跟进挂着的事，不看窗口',
-  badgePending: '待跟进',
+  badgePending: '小本本',
   groupTalkTitle: '搭话',
   groupTalkDescription: '监测、截图、间隔、持续：看窗口的频率，和什么时候递一个由头（待够了，或者到点看一眼）。',
   groupPetTitle: '桌宠上的动作',
@@ -101,7 +107,13 @@ const ZH: CheckinText = {
   sampleTitle: '间隔',
   sampleDescription: '多久看一次前台窗口。样本只在内存里存最近约四小时。',
   screenshotTitle: '截图',
-  screenshotDescription: '真要开口的时候截一张整个屏幕的图给模型看（JPEG、约 1280 宽）。图由框架按内容哈希存进 data/media，控制台「运行诊断 → 数据清理 → 附件库」里能清。当前模型看不了图时自动跳过。',
+  screenshotDescription: '真要开口的时候截一张整个屏幕的图给模型看。图由框架按内容哈希存进 data/media，控制台「运行诊断 → 数据清理 → 附件库」里能清。当前模型看不了图时自动跳过。',
+  shotPresetTitle: '清晰度',
+  shotPresetDescription: 'standard = 1280 宽、质量 70（原先那档，够看）；sharp = 1920 宽、质量 85（字更清楚，图大约大一倍）；original = 不缩放、质量 85（原始分辨率，最清楚也最大）；custom = 用下面两个数自己定。',
+  shotWidthTitle: '宽度',
+  shotWidthDescription: '只有清晰度选 custom 时才起作用。0 = 不缩放，保持原始分辨率。',
+  shotQualityTitle: '画质',
+  shotQualityDescription: '只有清晰度选 custom 时才起作用。1–100，越大越清楚、文件也越大（建议 70–90）。',
   pokeTitle: '连戳两下就搭话',
   pokeDescription: '连着戳它两下（两下要在两三秒内），它就看一眼你正在做什么，再决定要不要说句话。单戳一下不算。',
   companionTitle: '连摸两下就陪着看',
@@ -121,8 +133,9 @@ const ZH: CheckinText = {
   promptDocDescription: '告诉模型什么时候该开口、什么时候闭嘴。',
   panelProbeTitle: '状态',
   panelProbeDescription: '它现在看到的画面、采样间隔、今天说了几条，都在这页；整页只读。',
-  panelPendingTitle: '待跟进',
-  panelPendingDescription: '它记着以后要回头问的事：到点会自己提，这里可以先看，也可以直接结掉。提醒过一次、之后一直没有结果的会自动清掉，清多久也算在这页。',
+  panelPendingTitle: '小本本',
+  panelPendingDescription:
+    '它记着以后要回头问的事：到点会自己提，这里可以先看，也可以直接结掉。提醒过一次、之后一直没有结果的会自动清掉。底下的「心事」那三项决定它醒来时写不写、什么时候写。',
   groupRelayTitle: '转 QQ',
   groupRelayDescription:
     '桌宠冒出来的话，抄一份发到你 QQ 上。读的是桌宠自己记的对话，不经过模型的工具调用，所以它绕不开。只连本机，不出网。',
@@ -143,7 +156,7 @@ const EN: CheckinText = {
   lampLabel: 'Running',
   lampHintWatching: 'Following up on notes, and watching the foreground window',
   lampHintOff: 'Following up on notes only',
-  badgePending: 'Pending',
+  badgePending: 'Notebook',
   groupTalkTitle: 'Small talk',
   groupTalkDescription: 'Monitoring, screenshot, interval and stay-for: how often it looks at the window, and when it offers a reason to speak (staying put, or a timed glance).',
   groupPetTitle: 'Pet actions',
@@ -171,7 +184,13 @@ const EN: CheckinText = {
   sampleTitle: 'Interval',
   sampleDescription: 'How often the foreground window is sampled. Samples stay in memory (about four hours).',
   screenshotTitle: 'Screenshot',
-  screenshotDescription: 'Captures the whole screen as a JPEG (about 1280 wide) so the model can see it. The framework stores attachments by content hash under data/media (clear them from Run diagnostics > Clear data > Attachments). Skipped when the current model cannot read images.',
+  screenshotDescription: 'Captures the whole screen as a JPEG so the model can see it. The framework stores attachments by content hash under data/media (clear them from Run diagnostics > Clear data > Attachments). Skipped when the current model cannot read images.',
+  shotPresetTitle: 'Detail',
+  shotPresetDescription: 'standard = 1280 wide at quality 70 (the old setting, good enough); sharp = 1920 wide at quality 85 (crisper text, roughly twice the bytes); original = no downscale at quality 85 (native resolution, sharpest and largest); custom = use the two numbers below.',
+  shotWidthTitle: 'Width',
+  shotWidthDescription: 'Only used when Detail is custom. 0 = no downscale, keep the native resolution.',
+  shotQualityTitle: 'JPEG quality',
+  shotQualityDescription: 'Only used when Detail is custom. 1–100; higher is crisper and bigger (70–90 is a good range).',
   pokeTitle: 'Double-poke the pet to speak up',
   pokeDescription: 'Poke it twice within a couple of seconds and it will take a look at what you are doing, then decide whether to say a line. A single poke does nothing.',
   companionTitle: 'Two pets and it looks along',
@@ -191,8 +210,8 @@ const EN: CheckinText = {
   promptDocDescription: 'Tells the model when to speak up and when to stay silent.',
   panelProbeTitle: 'Status',
   panelProbeDescription: 'What it sees right now, the sampling interval, and how much it has said today — read only.',
-  panelPendingTitle: 'Pending follow-ups',
-  panelPendingDescription: 'Things it means to ask you about later: raised when due. See them here, or close them now. One that was raised once and never resolved clears itself after a while — how long is set on this page.',
+  panelPendingTitle: 'Notebook',
+  panelPendingDescription: 'Things it means to ask you about later: raised when due. See them here, or close them now. One that was raised once and never resolved clears itself after a while. The journal controls at the bottom decide whether and when it thinks things over.',
   groupRelayTitle: 'Forward to QQ',
   groupRelayDescription:
     'Copies what the pet says over to your QQ. It reads the pet own chat log instead of tool calls, so going around the tools still lands here. Local only.',

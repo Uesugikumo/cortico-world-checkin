@@ -27,6 +27,12 @@ export const CHECKIN_DEFAULTS = {
   sampleSeconds: 60,
   /** 要搭话的时候截一张图给模型看 */
   screenshot: true,
+  /** 截图清晰度档位：standard＝1280 宽/质量 70，sharp＝1920 宽/质量 85，original＝不缩放/质量 85，custom＝用下面两个数 */
+  shotPreset: 'standard',
+  /** 自定义档的宽度（像素）；0 = 不缩放，保持原始分辨率 */
+  shotWidth: 1280,
+  /** 自定义档的 JPEG 质量（1–100） */
+  shotQuality: 70,
   /** 连戳两下桌宠就去看一眼、并且允许开口 */
   pokeNudge: true,
   /** 连摸两下桌宠就陪着看一阵（下面两个数决定多久、多密） */
@@ -41,6 +47,12 @@ export const CHECKIN_DEFAULTS = {
   backNudge: true,
   /** 提醒过一次的跟进，过多久还没结果就自己清掉（分钟） */
   staleMinutes: 60,
+  /** 醒来的时候翻一眼《心事.md》，自己想想有没有事要说 */
+  journal: false,
+  /** 什么时候算「醒来」：quiet-end＝安静时段结束，custom＝只按下面的时间，both＝两者都要 */
+  wakeMode: 'quiet-end',
+  /** 自定义醒来时间，本地时间，逗号分隔多个（最多 8 个），写 `0900, 2130`（也认 `09:00`）。面板上叫「自定义」。 */
+  wakeTimes: '',
   /** 人不在的时候，桌宠冒出来的话抄一份到 QQ */
   relayAway: false,
   /** 不管人在不在，桌宠冒出来的话全抄一份到 QQ */
@@ -66,6 +78,9 @@ export interface CheckinConfigSection {
   softPerDay: number;
   sampleSeconds: number;
   screenshot: boolean;
+  shotPreset: string;
+  shotWidth: number;
+  shotQuality: number;
   pokeNudge: boolean;
   companion: boolean;
   companionMinutes: number;
@@ -73,6 +88,9 @@ export interface CheckinConfigSection {
   awayMinutes: number;
   backNudge: boolean;
   staleMinutes: number;
+  journal: boolean;
+  wakeMode: string;
+  wakeTimes: string;
   relayAway: boolean;
   relayAlways: boolean;
   relayTarget: string;
@@ -84,6 +102,7 @@ export interface CheckinConfigSection {
 const MINUTE = '分钟';
 const SECOND = '秒';
 const LINE = '条';
+const PIXEL = '像素';
 
 /**
  * 设置页按语义拆成四组（框架把每个 ConfigGroup 渲染成一个独立小节，
@@ -113,6 +132,30 @@ export function checkinConfigGroups(language: Language): ConfigGroup[] {
             title: t.screenshotTitle,
             'x-hot': true,
             description: t.screenshotDescription,
+          },
+          'worlds.checkin.shotPreset': {
+            type: 'string',
+            enum: ['standard', 'sharp', 'original', 'custom'],
+            title: t.shotPresetTitle,
+            'x-hot': true,
+            description: t.shotPresetDescription,
+          },
+          'worlds.checkin.shotWidth': {
+            type: 'integer',
+            title: t.shotWidthTitle,
+            minimum: 0,
+            maximum: 7680,
+            'x-hot': true,
+            'x-suffix': PIXEL,
+            description: t.shotWidthDescription,
+          },
+          'worlds.checkin.shotQuality': {
+            type: 'integer',
+            title: t.shotQualityTitle,
+            minimum: 1,
+            maximum: 100,
+            'x-hot': true,
+            description: t.shotQualityDescription,
           },
           'worlds.checkin.sampleSeconds': {
             type: 'integer',

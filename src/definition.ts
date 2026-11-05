@@ -59,6 +59,29 @@ export const CHECKIN: WorldDefinition<CheckinConfigSection> = {
           '别每轮都念。',
         parameters: { type: 'object', additionalProperties: false, properties: {} },
       },
+      {
+        name: 'journal_read',
+        tags: ['read'],
+        summary: '翻自己的心事本',
+        description: '翻《心事.md》：上一条在琢磨什么、还有哪些问题没答，顺带列出待跟进的事。醒来的时候先看它。',
+        parameters: { type: 'object', additionalProperties: false, properties: {} },
+      },
+      {
+        name: 'journal_append',
+        tags: ['write'],
+        summary: '往心事本里写一条',
+        description: '写一条：答的是哪个问题、答了什么、今天有没有冒出新问题。太短或者跟上一条一样会被拒收。',
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            question: { type: 'string', description: '答的是哪一句问题，或者「今天在想……」' },
+            answer: { type: 'string', description: '认真答的那一段；太短会被拒收' },
+            fresh: { type: 'string', description: '顺带冒出来的新问题，一句；没有就不填' },
+          },
+          required: ['answer'],
+        },
+      },
     ],
     events: [
       {
@@ -81,6 +104,12 @@ export const CHECKIN: WorldDefinition<CheckinConfigSection> = {
         tags: [],
         description:
           '他连着摸了你两下以上，接下来按设置陪一阵（默认十分钟、每两分钟一眼）递他的屏幕（带截图）。第一眼带 speak，后面几眼只是看着，不必每眼都开口。',
+      },
+      {
+        type: 'checkin.wake',
+        tags: ['speak'],
+        description:
+          '醒来了：安静时段结束、或者到了你设的钟点。正文让它翻《心事.md》答一句、再看有没有应过没做的事。安静时段里或人不在时只写不出声。',
       },
     ],
   },

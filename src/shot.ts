@@ -10,21 +10,37 @@ export interface Shot {
 const SHOT = fileURLToPath(new URL('./shot.ps1', import.meta.url));
 const PRINT = fileURLToPath(new URL('./print.ps1', import.meta.url));
 const TIMEOUT_MS = 15_000;
-/** 太大的图不如不给：超过这个尺寸就当没截到。 */
-const MAX_BYTES = 4 * 1024 * 1024;
+/** 太大的图不如不给：超过这个尺寸就当没截到（原图档在高分屏上会比标准档大不少，留够余量）。 */
+const MAX_BYTES = 6 * 1024 * 1024;
 /** 画面指纹的格子数（32x18），跟 print.ps1 里保持一致。 */
 export const PRINT_CELLS = 32 * 18;
 
+/** 标准档：1280 宽、JPEG 质量 70（老版本的尺寸，留作默认）。 */
+export const SHOT_WIDTH = 1280;
+export const SHOT_QUALITY = 70;
+
 /**
- * 截一张整个屏幕的图（多显示器时是所有屏幕的并集），缩放后以 JPEG 交回。
+ * 截一张整个屏幕的图（多显示器时是所有屏幕的并集），按 `width` 缩放后以 JPEG 交回。
+ * `width <= 0` 表示保持原始分辨率；`quality` 取 1–100。
  * 非 Windows、脚本报错、或尺寸离谱时返回 null——搭话照常进行，只是没有图。
  */
-export function captureScreen(): Promise<Shot | null> {
+export function captureScreen(width = SHOT_WIDTH, quality = SHOT_QUALITY): Promise<Shot | null> {
   if (process.platform !== 'win32') return Promise.resolve(null);
   return new Promise((resolve) => {
     execFile(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', SHOT],
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        SHOT,
+        '-Width',
+        String(Math.round(width)),
+        '-Quality',
+        String(Math.round(quality)),
+      ],
       { windowsHide: true, timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
       (err, stdout) => {
         if (err) {

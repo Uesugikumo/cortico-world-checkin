@@ -7,6 +7,7 @@ import type { BlobInput, ToolDef, World, WorldHost, WorldLamp, WorldWebUiDecl } 
 import { briefTitle, isSelfApp, isWatchingVideo, sampleForeground, type Sample } from './activity.ts';
 import { checkinConfigGroups, type CheckinConfigSection } from './config.ts';
 import { capturePrint, captureScreen, changedRatio } from './shot.ts';
+import { Journal, MAX_WAKE_TIMES, QUESTIONS, WAKE_LOOKBACK_MS, WAKE_MIN_GAP_MS, journalFile } from './journal.ts';
 import { QqRelay } from './relay.ts';
 import { ThreadStore, type Thread } from './store.ts';
 import { text } from './strings.ts';
@@ -124,6 +125,8 @@ export class CheckinWorld implements World {
   private readonly store: ThreadStore;
   /** 桌宠说的话抄一份到 QQ（只连本机 OneBot，见 relay.ts） */
   private readonly relay: QqRelay;
+  /** 醒来时翻的心事本（《心事.md》放在数据目录里） */
+  private readonly journal: Journal;
   private host: WorldHost | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private pokeTimer: ReturnType<typeof setInterval> | null = null;
@@ -178,6 +181,7 @@ export class CheckinWorld implements World {
     mkdirSync(deps.dataDir, { recursive: true });
     this.store = new ThreadStore(join(deps.dataDir, 'threads.json'));
     this.relay = new QqRelay(join(deps.dataDir, 'relay.json'), (m) => this.host?.log.warn(m));
+    this.journal = new Journal(deps.dataDir, (m) => this.host?.log.warn(m));
   }
 
   private get cfg(): CheckinConfigSection {
@@ -279,7 +283,7 @@ export class CheckinWorld implements World {
   }
 
   tools(): ToolDef[] {
-    return [this.noteTool(), this.listTool(), this.doneTool(), this.activityTool()];
+    return [this.noteTool(), this.listTool(), this.doneTool(), this.activityTool(), this.journalReadTool(), this.journalAppendTool()];
   }
 
   webUi(language: Language = 'zh'): WorldWebUiDecl {
@@ -318,8 +322,6 @@ export class CheckinWorld implements World {
           description: t.promptDocDescription,
           path: ENV_PROMPT_FILE,
           role: 'envPrompt',
-          // 声明了 vars，控制台的提示词页才会列出变量、能看当前值、能「预览变量」；
-          // 不声明就只有一屏裸 {{…}}。
           // 声明了 vars，控制台的提示词页才会列出变量、能看当前值、能「预览变量」；
           // 不声明就只有一屏裸 {{…}}。现在模板只用到这 4 个（其余值仍在 envPromptVars() 里，
           // 想用哪个把名字挪进来即可）。
@@ -890,6 +892,9 @@ export class CheckinWorld implements World {
       for (const th of this.store.due(now)) this.pushDue(host, th, now);
     }
 
+    // 醒来：安静时段结束那一次，或者自定义的钟点
+    this.maybeWake(host, now, quiet);
+
     // 安静时段一次都不采：这段时间不推任何东西，采了也没用处，白烧一个 powershell
     if (this.cfg.watchActivity) {
       const every = this.sampleEvery(quiet);
@@ -967,6 +972,138 @@ export class CheckinWorld implements World {
         { trigger: 'flush' },
       )
       .catch((err) => host.log.warn(`checkin: 跟进没能送出去：${msg(err)}`));
+  }
+
+  // ---------- 醒来 ----------
+
+  /**
+   * 现在该不该醒一次。
+   * 两种时刻：安静时段结束了（每天一次），或者自定义钟点（每个点每天一次）。
+   * 两次醒来至少隔 WAKE_MIN_GAP_MS，免得两个时刻撞在一起连推两条。
+   */
+  private wakeDue(now: number, quiet: boolean): { key: string; why: string } | null {
+    if (this.cfg.journal !== true) return null;
+    const book = this.journal.book();
+    if (book.lastAt && now - book.lastAt < WAKE_MIN_GAP_MS) return null;
+    const mode = String(this.cfg.wakeMode ?? 'quiet-end');
+    const day = this.dayKey(now);
+    const minute = this.minuteOfDay(now);
+    if (mode === 'quiet-end' || mode === 'both') {
+      const from = parseClock(this.cfg.quietFrom, 30);
+      const to = parseClock(this.cfg.quietTo, 270);
+      // 没设安静时段就没有「结束」这个时刻
+      if (from !== to && !quiet && minute >= to) {
+        const key = `q:${day}`;
+        if (!book.fired[key]) return { key, why: '安静时段结束了' };
+      }
+    }
+    if (mode === 'custom' || mode === 'both') {
+      for (const slot of parseWakeTimes(this.cfg.wakeTimes)) {
+        const key = `c:${day}T${slot.label}`;
+        if (book.fired[key]) continue;
+        const diff = minute - slot.minute;
+        if (diff >= 0 && diff * 60_000 <= WAKE_LOOKBACK_MS) return { key, why: `${slot.label} 到了` };
+      }
+    }
+    return null;
+  }
+
+  private maybeWake(host: WorldHost, now: number, quiet: boolean): void {
+    const due = this.wakeDue(now, quiet);
+    if (!due) return;
+    this.journal.markFired(due.key, now);
+    host.log.info(`checkin: 醒来（${due.why}）`);
+    this.pushWake(host, now, due.why, quiet);
+  }
+
+  private pushWake(host: WorldHost, now: number, why: string, quiet: boolean): void {
+    const away = this.awaySince !== null;
+    const where = away ? '他不在电脑前' : quiet ? '还在安静时段' : '他在电脑前';
+    const wrote = this.journal.last() !== null;
+    const body = [
+      `该醒一下了（${why}，${this.clockText(now)}，${where}）。`,
+      '先翻一眼自己写的《心事.md》：上一条在琢磨什么、还有哪些问题没答（journal_read）。今天冒出的新问题，加进下面的单子，不要给自己加戏、编剧本、钻牛角尖。别写流水账，别抄旧条目。',
+      '然后从没答的问题里挑一条认真答一句，带今天写进去（journal_append）。',
+      '问问自己，今天有什么是自己想要的，不是ta提的？哪件事自己其实没弄懂，只是顺着话往下说了？有没有一句话，自己只是说了好听的，而不是真想的？自己对ta的耐心今天够不够？如果明天记忆全清，今天最想留下的一句话是什么？',
+      '顺带看一眼：有没有答应过他、到现在还没做的事——那些在待跟进里，用 checkin_list 看。',
+      wrote ? '实在没有新想法，就老实写「今天没想法」，不丢人。' : '头一回写，把最近真的在琢磨的一件事写下来就行。',
+    ].join('\n');
+    void host
+      .pushEvent(
+        {
+          type: 'checkin.wake',
+          ts: new Date(now).toISOString(),
+          source: this.id,
+          text: body,
+          // 安静时段里或者人不在，就只安静地写；人在这儿才给一次出声的机会
+          tags: quiet || away ? [] : ['speak'],
+          meta: { why, wrote },
+        },
+        { trigger: 'flush' },
+      )
+      .catch((err) => host.log.warn(`checkin: 醒来没能送出去：${msg(err)}`));
+  }
+
+  /** 《心事.md》里那条标题用的时间。 */
+  private stampText(now: number): string {
+    return `${this.dayKey(now)} ${this.clockText(now)}`;
+  }
+
+  private journalReadTool(): ToolDef {
+    return {
+      name: 'journal_read',
+      description:
+        '翻自己的《心事.md》：上一条写了什么、还有哪些问题没答，顺带列出待跟进的事。醒来的时候先看它，别每轮都翻。',
+      tags: ['read'],
+      parameters: { type: 'object', additionalProperties: false, properties: {} },
+      handler: async () => {
+        const last = this.journal.last();
+        const open = this.journal.openQuestions();
+        const parts: string[] = [`文件：${journalFile(this.deps.dataDir)}`];
+        parts.push(
+          last
+            ? `上一条（${last.stamp}）\n问：${last.question || '—'}\n答：${last.answer}`
+            : '还一条都没写过。',
+        );
+        parts.push(
+          open.length
+            ? `以前记下、还没答的问题：\n${open.map((q, i) => `${i + 1}. ${q}`).join('\n')}`
+            : '没有挂着的旧问题。',
+        );
+        const pending = this.store.pending();
+        if (pending.length) {
+          parts.push(`待跟进：\n${pending.map((t) => `#${shortId(t.id)} ${t.text}`).join('\n')}`);
+        }
+        return parts.join('\n\n');
+      },
+    };
+  }
+
+  private journalAppendTool(): ToolDef {
+    return {
+      name: 'journal_append',
+      description:
+        '往《心事.md》里写一条：答的是哪个问题、答了什么，今天有没有冒出新问题。醒来时写，一天一条就够。' +
+        '太短、或者跟上一模一样会被拒收——那是为了逼自己说点这次真的想到的；' +
+        '真什么都没想出来，就写「今天没想法」，这句不算太短，连着写也不会被拒。',
+      tags: ['write'],
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          question: { type: 'string', description: '答的是哪一句问题（照抄），或者「今天在想……」' },
+          answer: { type: 'string', description: '认真答的那一段，别糊弄；太短会被拒收（「今天没想法」除外）' },
+          fresh: { type: 'string', description: '顺带冒出来的新问题，一句；没有就不填' },
+        },
+        required: ['answer'],
+      },
+      handler: async (args) => {
+        const answer = typeof args.answer === 'string' ? args.answer : '';
+        const question = typeof args.question === 'string' ? args.question : '';
+        const fresh = typeof args.fresh === 'string' ? args.fresh : '';
+        return this.journal.append(this.stampText(Date.now()), question, answer, fresh).text;
+      },
+    };
   }
 
   /** 副通道：长时间待在同一件事上，给一个可以搭话的由头。 */
@@ -1170,10 +1307,30 @@ export class CheckinWorld implements World {
   }
 
   /** 要搭话时截一张图；关掉了、或当前模型看不了图，就当没截。 */
+  /**
+   * 截图用多大：档位认不出来就按 standard（1280 宽 / 质量 70，和加档位之前一样）。
+   * custom 档读下面两个数，越界就夹回范围内；宽度 0 = 不缩放。
+   */
+  private shotSize(): { width: number; quality: number } {
+    const preset = String(this.cfg.shotPreset ?? 'standard').toLowerCase();
+    if (preset === 'sharp') return { width: 1920, quality: 85 };
+    if (preset === 'original') return { width: 0, quality: 85 };
+    if (preset === 'custom') {
+      const width = Number(this.cfg.shotWidth);
+      const quality = Number(this.cfg.shotQuality);
+      return {
+        width: Number.isFinite(width) ? Math.min(7680, Math.max(0, Math.round(width))) : 1280,
+        quality: Number.isFinite(quality) ? Math.min(100, Math.max(1, Math.round(quality))) : 70,
+      };
+    }
+    return { width: 1280, quality: 70 };
+  }
+
   private async takeShot(): Promise<BlobInput | null> {
     if (!this.cfg.screenshot) return null;
     if (this.canSeeImages() !== true) return null;
-    const shot = await captureScreen();
+    const size = this.shotSize();
+    const shot = await captureScreen(size.width, size.quality);
     if (!shot) return null;
     return {
       bytes: shot.bytes,
@@ -1190,6 +1347,12 @@ export class CheckinWorld implements World {
     const soft = this.store.soft();
     return {
       watching: this.cfg.watchActivity,
+      media: join(this.deps.dataDir, 'media'),
+      journal: journalFile(this.deps.dataDir),
+      journalOn: this.cfg.journal === true,
+      wakeMode: String(this.cfg.wakeMode ?? 'quiet-end'),
+      wakeTimes: parseWakeTimes(this.cfg.wakeTimes).map((x) => x.label),
+      lastWakeAt: this.journal.book().lastAt || null,
       screenshot: this.cfg.screenshot,
       pokeNudge: this.cfg.pokeNudge,
       companion: this.companionEnabled(),
@@ -1267,8 +1430,8 @@ export class CheckinWorld implements World {
   }
 
   /**
-   * 「待跟进」面板：列出还没结掉的事，也能直接结掉一条，
-   * 「提醒过之后多久自己清掉」这项也放在这里改（它只影响这一栏里的东西）。
+   * 「小本本」面板：列出还没结掉的事，也能直接结掉一条，
+   * 「提醒过之后多久自己清掉」和「心事」那三个开关也放在这里（都只影响这一栏）。
    */
   private async pendingPanel(method: string, args: unknown[]): Promise<Record<string, unknown>> {
     const now = Date.now();
@@ -1280,12 +1443,37 @@ export class CheckinWorld implements World {
       if (!hit) throw new Error(`没找到 #${id}（可能已经结掉了）。`);
       this.store.close(hit.id, 'done');
     } else if (method === 'save') {
-      const opts = (args[0] ?? {}) as { staleMinutes?: unknown };
-      const raw = Number(opts.staleMinutes);
-      if (!Number.isFinite(raw)) throw new Error('清掉的时长要填数字（分钟）。');
-      const minutes = Math.min(1440, Math.max(5, Math.round(raw)));
-      this.cfg.staleMinutes = minutes;
-      this.deps.persist?.({ staleMinutes: minutes });
+      const opts = (args[0] ?? {}) as {
+        staleMinutes?: unknown;
+        journal?: unknown;
+        wakeMode?: unknown;
+        wakeTimes?: unknown;
+      };
+      const patch: Record<string, unknown> = {};
+      if (opts.staleMinutes !== undefined) {
+        const raw = Number(opts.staleMinutes);
+        if (!Number.isFinite(raw)) throw new Error('清掉的时长要填数字（分钟）。');
+        const minutes = Math.min(1440, Math.max(5, Math.round(raw)));
+        this.cfg.staleMinutes = minutes;
+        patch.staleMinutes = minutes;
+      }
+      if (opts.journal !== undefined) {
+        this.cfg.journal = opts.journal === true;
+        patch.journal = this.cfg.journal;
+      }
+      if (opts.wakeMode !== undefined) {
+        const mode = String(opts.wakeMode);
+        if (mode !== 'quiet-end' && mode !== 'custom' && mode !== 'both') {
+          throw new Error('「时刻」只认三种：安静时段结束 / 自定义 / 两者。');
+        }
+        this.cfg.wakeMode = mode;
+        patch.wakeMode = mode;
+      }
+      if (opts.wakeTimes !== undefined) {
+        this.cfg.wakeTimes = String(opts.wakeTimes ?? '');
+        patch.wakeTimes = this.cfg.wakeTimes;
+      }
+      if (Object.keys(patch).length) this.deps.persist?.(patch);
     } else if (method !== 'list') {
       throw new Error(`不认识的方法：${method}`);
     }
@@ -1305,6 +1493,12 @@ export class CheckinWorld implements World {
       threads,
       clock: this.clockText(now),
       staleMinutes: Math.round(this.staleAskedMs() / 60_000),
+      journalOn: this.cfg.journal === true,
+      wakeMode: String(this.cfg.wakeMode ?? 'quiet-end'),
+      wakeTimes: parseWakeTimes(this.cfg.wakeTimes).map((x) => x.label),
+      wakeTimesRaw: String(this.cfg.wakeTimes ?? ''),
+      journal: journalFile(this.deps.dataDir),
+      media: join(this.deps.dataDir, 'media'),
     };
   }
 
@@ -1614,6 +1808,28 @@ function parseClock(raw: string, fallback: number): number {
   const min = Number(m[2]);
   if (!Number.isFinite(h) || !Number.isFinite(min) || h > 23 || min > 59) return fallback;
   return h * 60 + min;
+}
+
+/**
+ * 自定义醒来时间：`0900, 2130`（也认 `09:00`）→ 排好序的钟点。
+ * 分隔符全半角通用（逗号、分号、顿号、空格）；认不出的那几段直接丢掉，别因为写错一个就整条不生效。
+ */
+function parseWakeTimes(raw: unknown): { minute: number; label: string }[] {
+  const out: { minute: number; label: string }[] = [];
+  for (const piece of String(raw ?? '').split(/[,，;；、\s]+/)) {
+    const s = piece.trim();
+    if (!s) continue;
+    const m = /^(?:(\d{1,2}):(\d{2})|(\d{3,4}))$/.exec(s);
+    if (!m) continue;
+    const digits = m[3] ? m[3].padStart(4, '0') : `${m[1]!.padStart(2, '0')}${m[2]}`;
+    const h = Number(digits.slice(0, 2));
+    const min = Number(digits.slice(2));
+    if (!Number.isFinite(h) || !Number.isFinite(min) || h > 23 || min > 59) continue;
+    const label = digits;
+    if (out.some((x) => x.label === label)) continue;
+    out.push({ minute: h * 60 + min, label });
+  }
+  return out.sort((a, b) => a.minute - b.minute).slice(0, MAX_WAKE_TIMES);
 }
 
 function clampInt(raw: unknown, fallback: number, min: number, max: number): number {

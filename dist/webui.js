@@ -8,6 +8,42 @@ function errText(err) {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** 复制路径：先试剪贴板，再退回 execCommand（Coo 的页面在 http 下也常能成功）。 */
+async function copyText(text) {
+  if (!text || text === '—') return false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // 落到下面再试一次
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+async function copyPath(text, btn) {
+  const before = btn.textContent;
+  const ok = await copyText(text);
+  btn.textContent = ok ? '已复制' : '没复制上';
+  window.setTimeout(() => {
+    btn.textContent = before;
+  }, 1600);
+}
+
 function mountProbe(ctx) {
   const ui = ctx.ui;
   // 面板标签已经写着「状态」，卡片自己不再重复一个标题。
@@ -32,6 +68,16 @@ function mountProbe(ctx) {
   const recentText = ui.h('span', '', '—');
   const message = ui.msgline('');
 
+  const wakePill = ui.pill('—', 'plain');
+  const mediaText = ui.h('span', 'mono', '—');
+  const journalText = ui.h('span', 'mono', '—');
+  const copyMediaBtn = ui.button('复制路径', { size: 'sm', onClick: () => void copyPath(mediaText.textContent, copyMediaBtn) });
+  const copyJournalBtn = ui.button('复制路径', { size: 'sm', onClick: () => void copyPath(journalText.textContent, copyJournalBtn) });
+  const mediaBar = ui.rowbar();
+  mediaBar.append(mediaText, copyMediaBtn);
+  const journalBar = ui.rowbar();
+  journalBar.append(journalText, copyJournalBtn);
+
   sheet.body.append(
     ui.field('监测', watchPill),
     ui.field('看一眼屏幕', topPill),
@@ -43,12 +89,16 @@ function mountProbe(ctx) {
     ui.field('画面在不在变', focusText),
     ui.field('离开判定 / 回来问候', awayText),
     ui.field('现在', backPill),
+    ui.field('心事', wakePill),
     ui.section('当前采集到的信息'),
     ui.field('前台程序', procText),
     ui.field('窗口标题', titleText),
     ui.field('键鼠空闲', idleText),
     ui.field('连续同一程序', streakText),
     ui.field('最近一小时', recentText),
+    ui.section('文件在哪'),
+    ui.field('附件库', mediaBar),
+    ui.field('心事.md', journalBar),
     message,
   );
   ctx.root.appendChild(sheet.el);
@@ -119,6 +169,25 @@ function mountProbe(ctx) {
     awayText.textContent = `${away} 分钟没动键鼠算离开 · 回来${st.backNudge === false ? '不说' : '说一句'}${verdict}`;
     if (st.awaySince) { backPill.textContent = '人不在'; backPill.className = 'pill off'; }
     else { backPill.textContent = '在'; backPill.className = 'pill on'; }
+
+    if (!st.journalOn) {
+      wakePill.textContent = '关着';
+      wakePill.className = 'pill off';
+    } else {
+      const modes = [];
+      if (st.wakeMode === 'quiet-end' || st.wakeMode === 'both') modes.push('安静时段结束');
+      if (st.wakeMode === 'custom' || st.wakeMode === 'both') {
+        const times = Array.isArray(st.wakeTimes) ? st.wakeTimes : [];
+        modes.push(times.length ? `每 ${times.join('、')}` : '没设时间');
+      }
+      wakePill.textContent = modes.length ? modes.join(' · ') : '开着';
+      wakePill.className = st.wakeMode === 'custom' && !(st.wakeTimes || []).length ? 'pill off' : 'pill on';
+    }
+
+    mediaText.textContent = st.media || '—';
+    copyMediaBtn.disabled = !st.media;
+    journalText.textContent = st.journal || '—';
+    copyJournalBtn.disabled = !st.journal;
   }
 
   function say(text, bad) {
@@ -147,8 +216,8 @@ function mountProbe(ctx) {
 function mountPending(ctx) {
   const ui = ctx.ui;
   const sheet = ui.sheet({
-    title: '待跟进',
-    desc: '它记着以后要回头问的事。到点会自己提，这里可以先看，也能直接结掉。提醒过一次、之后一直没有结果的会自动清掉，清多久就在下面改（改完自动存）。',
+    title: '小本本',
+    desc: '它记着以后要回头问的事。到点会自己提，这里可以先看，也能直接结掉。提醒过一次、之后一直没有结果的会自动清掉。底下的「心事」决定它醒来写不写、什么时候写（改完自动存）。',
   });
 
   const table = ui.table({ head: ['#', '要跟进的事', '什么时候提', ''], maxHeight: '320px' });
@@ -162,11 +231,34 @@ function mountPending(ctx) {
   const bar = ui.rowbar();
   bar.append(refreshBtn);
 
+  // ---- 心事（从设置页挪过来的三项） ----
+  const journalCheck = ui.checkbox('让我想', {
+    title: '醒来的时候翻一眼心事.md，写下一条',
+    onChange: (checked) => void saveJournal({ journal: checked }),
+  });
+  const wakeModeSeg = ui.segmented(
+    [
+      { value: 'quiet-end', label: '安静时段结束' },
+      { value: 'custom', label: '自定义' },
+      { value: 'both', label: '两者' },
+    ],
+    { size: 'sm', onSelect: (value) => void saveJournal({ wakeMode: value }) },
+  );
+  const timesInput = ui.input({ type: 'text', value: '', placeholder: '0900, 2130', cls: 'mono' });
+  const timesBar = ui.rowbar();
+  timesBar.append(timesInput);
+  const timesHint = ui.h('div', 'tdesc', '写 0900 这种四位数，逗号隔开多个；全半角逗号、分号、空格都行。');
+
   sheet.body.append(
     ui.field('共几条', totalText),
     table.el,
     ui.field('提醒过的跟进多久清掉（分钟，5–1440）', staleInputBar),
     staleHint,
+    ui.section('心事', '醒来的时候想想事情：翻一眼心事.md、挑个没答的问题写一条。'),
+    ui.field('让我想', journalCheck.el),
+    ui.field('时刻', wakeModeSeg.el),
+    ui.field('自定义', timesBar),
+    timesHint,
     bar,
     message,
   );
@@ -250,6 +342,52 @@ function mountPending(ctx) {
     void saveStale(quiet);
   }
 
+  // ---- 心事三项的保存（跟上面的数字一样：改完自动存） ----
+  let journalBusy = false;
+  let timesTimer = 0;
+  let lastTimes = null;
+
+  async function saveJournal(patch) {
+    if (journalBusy) return;
+    journalBusy = true;
+    try {
+      const res = await ctx.invoke('save', [patch]);
+      if (ctx.signal && ctx.signal.aborted) return;
+      render(res);
+      say('存好了。', false);
+      ui.toast('存好了', 'ok');
+    } catch (err) {
+      if (ctx.signal && ctx.signal.aborted) return;
+      say(`没存上：${errText(err)}`, true);
+      ui.toast('没存上', 'bad');
+      if (lastTimes !== null && Object.prototype.hasOwnProperty.call(patch, 'wakeTimes')) {
+        timesInput.value = lastTimes;
+      }
+    } finally {
+      journalBusy = false;
+    }
+  }
+
+  function syncTimes(quiet) {
+    if (timesTimer) {
+      clearTimeout(timesTimer);
+      timesTimer = 0;
+    }
+    const raw = timesInput.value;
+    if (raw === lastTimes) return;
+    void saveJournal({ wakeTimes: raw });
+  }
+
+  timesInput.addEventListener('input', () => {
+    if (timesTimer) clearTimeout(timesTimer);
+    timesTimer = setTimeout(() => {
+      timesTimer = 0;
+      syncTimes(true);
+    }, 800);
+  });
+  timesInput.addEventListener('change', () => syncTimes(false));
+  timesInput.addEventListener('blur', () => syncTimes(true));
+
   staleInput.addEventListener('input', () => {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
@@ -275,6 +413,25 @@ function mountPending(ctx) {
       const asked = t.asked ? '（提醒过）' : '';
       table.addRow([`#${t.id}`, t.text, `${t.dueText || '—'}${t.overdue ? '（到点了）' : ''}${asked}`, btn]);
     }
+
+    // 心事三项（也在这一页，跟上面一样改完自动存）
+    const journalOn = Boolean(res && res.journalOn === true);
+    if (typeof journalCheck.setChecked === 'function') journalCheck.setChecked(journalOn);
+    const mode = res && typeof res.wakeMode === 'string' ? res.wakeMode : 'quiet-end';
+    if (typeof wakeModeSeg.setValue === 'function') wakeModeSeg.setValue(mode);
+    const rawTimes = res && typeof res.wakeTimesRaw === 'string' ? res.wakeTimesRaw : '';
+    lastTimes = rawTimes;
+    if (typeof document === 'undefined' || document.activeElement !== timesInput) {
+      timesInput.value = rawTimes;
+    }
+    timesInput.disabled = mode === 'quiet-end';
+    const parsed = res && Array.isArray(res.wakeTimes) ? res.wakeTimes : [];
+    timesHint.textContent =
+      mode === 'quiet-end'
+        ? '「时刻」现在按安静时段结束算，这里填的时间不会被用；想按钟点醒就把「时刻」切成自定义或两者。'
+        : parsed.length
+          ? `现在会在 ${parsed.join('、')} 醒（每个时间点一天醒一次，两次之间至少隔 20 分钟）。`
+          : '还没填时间。写 0900 这种四位数，逗号隔开，例如 0900, 2130。';
   }
 
   async function refresh() {

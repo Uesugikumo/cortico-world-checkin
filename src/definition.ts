@@ -17,14 +17,19 @@ export const CHECKIN: WorldDefinition<CheckinConfigSection> = {
         tags: ['write'],
         summary: '记下一件以后要回头问的事',
         description:
-          '记下一件以后要回头问的事（他约了人、说要修东西、明天要早起这类）。到点会有人提醒你。' +
-          '别把每句话都记成待办，只记真的会想知道结果的那些。',
+          '记下一件以后要回头问的事（他约了人、说要修东西、明天要早起这类）。到点会有人提醒你，' +
+          '到那时再决定说不说。别把每句话都记成待办，只记真的会想知道结果的那些。',
         parameters: {
           type: 'object',
           additionalProperties: false,
           properties: {
-            text: { type: 'string', description: '要跟进的事，一句短话' },
-            afterMinutes: { type: 'integer', minimum: 1, maximum: 10080, description: '过多少分钟再来提；不给就两小时' },
+            text: { type: 'string', description: '要跟进的事，一句短话，写清他哪天说的什么' },
+            afterMinutes: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 10080,
+              description: '过多少分钟再来提；不给就两小时后',
+            },
           },
           required: ['text'],
         },
@@ -40,13 +45,13 @@ export const CHECKIN: WorldDefinition<CheckinConfigSection> = {
         name: 'checkin_done',
         tags: ['write'],
         summary: '把一条跟进标掉',
-        description: '这件事有结果了、不用再问，标掉它；也可以用来放弃。',
+        description: '这件事有结果了、不用再问，标掉它。也可以用来放弃（他明显不想聊那件事）。',
         parameters: {
           type: 'object',
           additionalProperties: false,
           properties: {
             id: { type: 'string', description: '编号，写前几位就行' },
-            text: { type: 'string', description: '或者写这件事里的几个字' },
+            text: { type: 'string', description: '或者写这件事里的几个字，按原文找' },
           },
         },
       },
@@ -55,28 +60,31 @@ export const CHECKIN: WorldDefinition<CheckinConfigSection> = {
         tags: ['read'],
         summary: '看他现在在电脑前做什么',
         description:
-          '看他现在在电脑前做什么：前台程序、窗口标题、多久没动键鼠、最近一小时换过哪些程序。' +
-          '别每轮都念。',
+          '看看他现在在电脑前做什么：前台是哪个程序、窗口标题、多久没动键鼠，以及最近一小时换过哪些程序。' +
+          '只在真的要接话，或者他问「你看得见我在干嘛吗」的时候用，别每轮都念。',
         parameters: { type: 'object', additionalProperties: false, properties: {} },
       },
       {
         name: 'journal_read',
         tags: ['read'],
         summary: '翻自己的心事本',
-        description: '翻《心事.md》：上一条在琢磨什么、还有哪些问题没答，顺带列出待跟进的事。醒来的时候先看它。',
+        description: '翻自己的《心事.md》：上一条写了什么、还有哪些问题没答，顺带列出待跟进的事。醒来的时候先看它，别每轮都翻。',
         parameters: { type: 'object', additionalProperties: false, properties: {} },
       },
       {
         name: 'journal_append',
         tags: ['write'],
         summary: '往心事本里写一条',
-        description: '写一条：答的是哪个问题、答了什么、今天有没有冒出新问题。太短或者跟上一条一样会被拒收。',
+        description:
+          '往《心事.md》里写一条：答的是哪个问题、答了什么，今天有没有冒出新问题。醒来时写，一天一条就够。' +
+          '太短、或者跟上一模一样会被拒收——那是为了逼自己说点这次真的想到的；' +
+          '真什么都没想出来，就写「今天没想法」，这句不算太短，连着写也不会被拒。',
         parameters: {
           type: 'object',
           additionalProperties: false,
           properties: {
-            question: { type: 'string', description: '答的是哪一句问题，或者「今天在想……」' },
-            answer: { type: 'string', description: '认真答的那一段；太短会被拒收' },
+            question: { type: 'string', description: '答的是哪一句问题（照抄），或者「今天在想……」' },
+            answer: { type: 'string', description: '认真答的那一段，别糊弄；太短会被拒收（「今天没想法」除外）' },
             fresh: { type: 'string', description: '顺带冒出来的新问题，一句；没有就不填' },
           },
           required: ['answer'],

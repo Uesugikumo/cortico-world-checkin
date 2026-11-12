@@ -6,20 +6,20 @@
         "write"
       ],
       "summary": "记下一件以后要回头问的事",
-      "description": "记下一件以后要回头问的事（他约了人、说要修东西、明天要早起这类）。到点会有人提醒你。别把每句话都记成待办，只记真的会想知道结果的那些。",
+      "description": "记下一件以后要回头问的事（他约了人、说要修东西、明天要早起这类）。到点会有人提醒你，到那时再决定说不说。别把每句话都记成待办，只记真的会想知道结果的那些。",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "text": {
             "type": "string",
-            "description": "要跟进的事，一句短话"
+            "description": "要跟进的事，一句短话，写清他哪天说的什么"
           },
           "afterMinutes": {
             "type": "integer",
             "minimum": 1,
             "maximum": 10080,
-            "description": "过多少分钟再来提；不给就两小时"
+            "description": "过多少分钟再来提；不给就两小时后"
           }
         },
         "required": [
@@ -46,7 +46,7 @@
         "write"
       ],
       "summary": "把一条跟进标掉",
-      "description": "这件事有结果了、不用再问，标掉它；也可以用来放弃。",
+      "description": "这件事有结果了、不用再问，标掉它。也可以用来放弃（他明显不想聊那件事）。",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -57,7 +57,7 @@
           },
           "text": {
             "type": "string",
-            "description": "或者写这件事里的几个字"
+            "description": "或者写这件事里的几个字，按原文找"
           }
         }
       }
@@ -68,11 +68,53 @@
         "read"
       ],
       "summary": "看他现在在电脑前做什么",
-      "description": "看他现在在电脑前做什么：前台程序、窗口标题、多久没动键鼠、最近一小时换过哪些程序。别每轮都念。",
+      "description": "看看他现在在电脑前做什么：前台是哪个程序、窗口标题、多久没动键鼠，以及最近一小时换过哪些程序。只在真的要接话，或者他问「你看得见我在干嘛吗」的时候用，别每轮都念。",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {}
+      }
+    },
+    {
+      "name": "journal_read",
+      "tags": [
+        "read"
+      ],
+      "summary": "翻自己的心事本",
+      "description": "翻自己的《心事.md》：上一条写了什么、还有哪些问题没答，顺带列出待跟进的事。醒来的时候先看它，别每轮都翻。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "journal_append",
+      "tags": [
+        "write"
+      ],
+      "summary": "往心事本里写一条",
+      "description": "往《心事.md》里写一条：答的是哪个问题、答了什么，今天有没有冒出新问题。醒来时写，一天一条就够。太短、或者跟上一模一样会被拒收——那是为了逼自己说点这次真的想到的；真什么都没想出来，就写「今天没想法」，这句不算太短，连着写也不会被拒。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "答的是哪一句问题（照抄），或者「今天在想……」"
+          },
+          "answer": {
+            "type": "string",
+            "description": "认真答的那一段，别糊弄；太短会被拒收（「今天没想法」除外）"
+          },
+          "fresh": {
+            "type": "string",
+            "description": "顺带冒出来的新问题，一句；没有就不填"
+          }
+        },
+        "required": [
+          "answer"
+        ]
       }
     }
   ],
@@ -100,6 +142,21 @@
       "type": "checkin.companion",
       "tags": [],
       "description": "他连着摸了你两下以上，接下来按设置陪一阵（默认十分钟、每两分钟一眼）递他的屏幕（带截图）。第一眼带 speak，后面几眼只是看着，不必每眼都开口。"
+    },
+    {
+      "type": "checkin.wake",
+      "tags": [
+        "speak"
+      ],
+      "description": "醒来了：安静时段结束、或者到了你设的钟点。正文让它翻《心事.md》答一句、再看有没有应过没做的事。安静时段里或人不在时只写不出声。"
+    }
+  ],
+  "prompts": [
+    {
+      "key": "worlds.checkin.envPrompt",
+      "title": "Where Are You 提示词",
+      "role": "envPrompt",
+      "content": "# Where Are You 模块行为守则\n\n这个模块只决定一件事：你什么时候可以说一句。开口的默认出口是桌面气泡（说给 TA 本人听）。\n\n- 当前：本地时间 {{checkin.now}}，安静时段 {{checkin.quiet}}，{{checkin.watch}}，手上挂着 {{checkin.pending}} 条跟进。\n- 安静时段里不主动开口；TA 戳你、摸你不算你主动，可以应一句。\n- 这个模块的账只记在 `checkin_note`；`checkin_activity` 是查看用的，别每轮都念一遍。\n- 说话像旁边的人，别像监控：「这报错你磨了一个多小时了吧」✓；「检测到您已连续使用 120 分钟」✗。\n- 有具体想说的就说，说完就停；真没素材（截图也没看出什么、标题也读不出信息）才可以不吭声——沉默不是默认答案。\n- 截图系统自动带，看懂了照内容说，别逐字念；窗口标题可能涉及隐私，复述只说大意；别在回复里念一串进程名。\n- 这些信息绝不外发、不写进文件。\n"
     }
   ]
 }

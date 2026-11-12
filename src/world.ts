@@ -176,6 +176,21 @@ export class CheckinWorld implements World {
   /** 收尾提醒只补一次，补过就置为 Infinity 的等价值（用 awayNagged 记）。 */
   private awayNagged = false;
 
+  /**
+   * 「开关」面板管的字段（都是 true/false）。顺序就是面板上的顺序：
+   * 先监测，再按需看一眼，再截图，然后是桌宠那两下，最后是回来和转 QQ。
+   */
+  private static readonly SWITCH_KEYS = [
+    'watchActivity',
+    'lookEnabled',
+    'screenshot',
+    'pokeNudge',
+    'companion',
+    'backNudge',
+    'relayAway',
+    'relayAlways',
+  ] as const;
+
   constructor(deps: Deps) {
     this.deps = deps;
     mkdirSync(deps.dataDir, { recursive: true });
@@ -224,6 +239,16 @@ export class CheckinWorld implements World {
    * 老配置里没有这个键（`defaults()` 只补整个缺失的 world），别把它当成「用户填了 0」。
    */
   private lookEveryMinutes(): number {
+    // 总开关关着就当没设：面板上那颗「看一眼」灯、定时看一眼都跟着停
+    if (this.cfg.lookEnabled === false) return 0;
+    // 定时看一眼要先有采样才知道看哪儿、他还在不在；监测一关采样就停了，
+    // 这一项自动跟着关（配置里那个数字留着，回头开监测还能接着用）
+    if (!this.cfg.watchActivity) return 0;
+    return this.lookIntervalRaw();
+  }
+
+  /** 配置里那个「隔多久看一眼」本身的值，不管开关有没有把它架住；0 = 没设或填了 0。 */
+  private lookIntervalRaw(): number {
     const raw = this.cfg.lookEveryMinutes;
     const n = raw === undefined || raw === null ? LOOK_DEFAULT_MIN : Math.round(Number(raw));
     if (!Number.isFinite(n) || n <= 0) return 0;
@@ -259,7 +284,9 @@ export class CheckinWorld implements World {
         : '连着摸你两下已经关掉了，收不到这种陪伴',
       'checkin.look': this.lookEveryMinutes() > 0
         ? `不管窗口有没有换，每隔 ${this.lookEveryMinutes()} 分钟会主动看一眼 TA 现在在做什么`
-        : '「按时间看一眼屏幕」关着，只有同一个程序待久了才给由头',
+        : this.cfg.watchActivity
+          ? '「按时间看一眼屏幕」关着，只有同一个程序待久了才给由头'
+          : '没在观察窗口，「按时间看一眼」也跟着停了——别假装你看过屏幕',
       'checkin.focus':
         `他手停着不动、但屏幕上的东西一直在变的时候，人是在的（看书、看画、看片都这样）——` +
         `这种时候照样可以搭话，只是要就着屏幕上的内容说，别问「你在干嘛」「你还在吗」。` +
@@ -289,22 +316,77 @@ export class CheckinWorld implements World {
   webUi(language: Language = 'zh'): WorldWebUiDecl {
     const t = text(language);
     const zh = language === 'zh';
-    const lamp: WorldLamp = {
-      label: t.lampLabel,
-      state: this.host ? 'online' : 'offline',
-      hint: this.cfg.watchActivity ? t.lampHintWatching : t.lampHintOff,
-    };
+    // 那一排灯：一颗一件事，World 列表行内显示成「名字 · 说明」，悬停也是这句。
+    // state 只决定颜色：online 绿 / loading 黄（有条件或临时停着）/ error 红 / offline 灰。
+    const lamps: WorldLamp[] = [];
+    // 1. 监测：开没开、为什么没在动
+    const seconds = Math.max(15, Math.round(Number(this.cfg.sampleSeconds) || 60));
+    if (!this.host) {
+      lamps.push({ label: t.lampWatchLabel, state: 'offline', hint: t.lampWatchOffline });
+    } else if (!this.petPresent) {
+      lamps.push({ label: t.lampWatchLabel, state: 'offline', hint: t.lampWatchPetOff });
+    } else if (this.inQuiet(Date.now())) {
+      lamps.push({
+        label: t.lampWatchLabel,
+        state: 'loading',
+        hint: t.lampWatchQuiet(this.cfg.quietFrom ?? '', this.cfg.quietTo ?? ''),
+      });
+    } else {
+      lamps.push({
+        label: t.lampWatchLabel,
+        state: this.cfg.watchActivity ? 'online' : 'offline',
+        hint: this.cfg.watchActivity ? t.lampWatchOn(seconds) : t.lampWatchNoFront,
+      });
+    }
+    // 2. 隔多久主动看一眼屏幕：安静时段不主动看（tick 里 !quiet 才调 maybeLook），
+    //    关掉看前台时也一起停（maybeLook 开头就要 watchActivity）。
+    //    注意顺序：lookEveryMinutes() 在监测关着时也回 0，先判它会把「监测没开」误报成「关了」。
+    const lookEvery = this.lookEveryMinutes();
+    if (!this.cfg.watchActivity) {
+      lamps.push({ label: t.lampLookLabel, state: 'offline', hint: t.lampLookNoFront });
+    } else if (this.cfg.lookEnabled === false) {
+      lamps.push({ label: t.lampLookLabel, state: 'offline', hint: t.lampLookOff });
+    } else if (lookEvery <= 0) {
+      lamps.push({ label: t.lampLookLabel, state: 'offline', hint: t.lampLookOff });
+    } else if (!this.host || !this.petPresent) {
+      lamps.push({ label: t.lampLookLabel, state: 'offline', hint: t.lampLookOff });
+    } else if (this.inQuiet(Date.now())) {
+      lamps.push({
+        label: t.lampLookLabel,
+        state: 'loading',
+        hint: t.lampLookQuiet(this.cfg.quietFrom ?? '', this.cfg.quietTo ?? ''),
+      });
+    } else {
+      lamps.push({ label: t.lampLookLabel, state: 'online', hint: t.lampLookEvery(lookEvery) });
+    }
+    // 3. 回来说一句：安静时段不开口（watchAway 里有 inQuiet 门），
+    //    关掉看前台时连「回来」都认不出（没有采样就没有 away/back 判定）
+    if (!this.cfg.backNudge) {
+      lamps.push({ label: t.lampBackLabel, state: 'offline', hint: t.lampBackOff });
+    } else if (!this.host || !this.petPresent) {
+      lamps.push({ label: t.lampBackLabel, state: 'offline', hint: t.lampBackOff });
+    } else if (this.inQuiet(Date.now())) {
+      lamps.push({
+        label: t.lampBackLabel,
+        state: 'loading',
+        hint: t.lampBackQuiet(this.cfg.quietFrom ?? '', this.cfg.quietTo ?? ''),
+      });
+    } else if (!this.cfg.watchActivity) {
+      lamps.push({ label: t.lampBackLabel, state: 'offline', hint: t.lampBackNoFront });
+    } else {
+      lamps.push({ label: t.lampBackLabel, state: 'online', hint: t.lampBackOn });
+    }
     const pending = this.store.pending().length;
     return {
       label: t.moduleLabel,
-      lamps: [lamp],
+      lamps,
       badges: [{ label: t.badgePending, value: String(pending), tone: pending > 0 ? 'on' : 'plain' }],
       panels: [
         {
-          id: 'probe',
-          title: t.panelProbeTitle,
-          description: t.panelProbeDescription,
-          getMethods: ['status'],
+          id: 'switches',
+          title: t.panelSwitchesTitle,
+          description: t.panelSwitchesDescription,
+          getMethods: ['list'],
         },
         {
           id: 'pending',
@@ -1267,9 +1349,12 @@ export class CheckinWorld implements World {
   /**
    * 「看一眼」的正确姿势：先真采一次；采到的是 Coo 自己（刚戳完桌宠、刚点面板按钮，
    * 前台就是我），或者采失败，就用最近一次真实样本顶上——否则一戳就什么都看不见。
+   *
+   * 这里**不看** watchActivity：那个开关管的是「定时采样」（后台一直看），
+   * 而这一眼是被他戳/摸出来的、按需采一次。以前把它拦在这里，
+   * 关掉「看前台窗口」之后连戳两下和连摸两下就全哑了——只开陪伴却一眼都递不出去。
    */
   private async lookSample(): Promise<Look | null> {
-    if (!this.cfg.watchActivity) return null;
     this.lastSampleAt = Date.now();
     const fresh = await sampleForeground();
     if (fresh && !isSelfApp(fresh.proc)) {
@@ -1277,8 +1362,10 @@ export class CheckinWorld implements World {
       return { sample: fresh, selfNow: false, fromLast: false };
     }
     const last = this.lastRealSample();
-    if (!last) return null;
-    return { sample: last, selfNow: Boolean(fresh), fromLast: true };
+    if (last) return { sample: last, selfNow: Boolean(fresh), fromLast: true };
+    // 一眼都没采到过（刚启动、或者探前台一直失败）：也别把这次戳/摸吞掉，
+    // 递出去的时候前台会显示「（不知道）」，比一声不吭强。
+    return { sample: { at: Date.now(), proc: '', title: '', idleMs: 0 }, selfNow: Boolean(fresh), fromLast: true };
   }
 
   private pushSample(sample: Sample): void {
@@ -1409,6 +1496,7 @@ export class CheckinWorld implements World {
 
   private async invokePanel(panel: string, method: string, args: unknown[]): Promise<unknown> {
     if (panel === 'pending') return this.pendingPanel(method, args);
+    if (panel === 'switches') return this.switchesPanel(method, args);
     if (panel !== 'probe') throw new Error(`不认识的面板：${panel}`);
     if (method === 'status') return this.probeStatus();
     if (method === 'sample') {
@@ -1427,6 +1515,137 @@ export class CheckinWorld implements World {
       return { ...this.probeStatus(), ...result };
     }
     throw new Error(`不认识的方法：${method}`);
+  }
+
+  /**
+   * 「开关」面板：把配置里那几项 true/false 集中放在一页，拨一下就生效（x-hot），
+   * 省得进设置页一行行找。字段顺序见 SWITCH_KEYS。
+   */
+  private async switchesPanel(method: string, args: unknown[]): Promise<Record<string, unknown>> {
+    const keys = CheckinWorld.SWITCH_KEYS;
+    if (method === 'save') {
+      const opts = (args[0] ?? {}) as Record<string, unknown>;
+      const patch: Record<string, unknown> = {};
+      for (const key of keys) {
+        if (opts[key] === undefined) continue;
+        const on = opts[key] === true;
+        (this.cfg as unknown as Record<string, unknown>)[key] = on;
+        patch[key] = on;
+      }
+      if (Object.keys(patch).length) this.deps.persist?.(patch);
+    } else if (method !== 'list') {
+      throw new Error(`不认识的方法：${method}`);
+    }
+    return this.switchesState();
+  }
+
+  /**
+   * 「开关」页要显示的全部内容：每个开关的当前值 + 紧挨着它的那句状态，
+   * 外加几行跟开关同一回事的细节。状态文案在这里拼好，客户端只管摆位置。
+   */
+  private switchesState(): Record<string, unknown> {
+    const keys = CheckinWorld.SWITCH_KEYS;
+    const p = this.probeStatus();
+    const fg = p.foreground as { proc?: unknown; title?: unknown; idleMs?: unknown } | null;
+    const watchInfo = fg
+      ? {
+          proc: String(fg.proc || ''),
+          title: String(fg.title || ''),
+          idle: `${Math.max(0, Math.round(Number(fg.idleMs) / 60_000))} 分钟没碰键鼠`,
+          streak: `${Number(p.streakMinutes)} 分钟都在同一个程序上`,
+          recent: String(p.recentHour || ''),
+        }
+      : { proc: '', title: '', idle: '还没采到前台窗口', streak: '', recent: String(p.recentHour || '') };
+    const lookDueIn = Number(p.lookDueIn);
+    const lastLookAt = p.lastLookAt ? this.clockText(Date.parse(String(p.lastLookAt))) : '';
+    const lookInfo = {
+      last: lastLookAt ? `上次 ${lastLookAt}` : '还没看过',
+      next: this.lookEveryMinutes() > 0 ? (lookDueIn > 0 ? `${lookDueIn} 分钟后` : '该看了') : '',
+    };
+    const companionInfo = {
+      state: p.companionNow
+        ? `正在陪，还剩 ${Number(p.companionLeft)} 分钟（这趟已看 ${Number(p.companionCount)} 眼）`
+        : '没在陪',
+    };
+    return {
+      switches: keys.map((key) => {
+        const lock = this.switchLock(key);
+        return { key, on: this.switchOn(key), status: this.switchStatus(key, p), locked: lock.locked, lockReason: lock.reason };
+      }),
+      info: { watch: watchInfo, look: lookInfo, companion: companionInfo },
+      paths: { media: String(p.media || ''), journal: String(p.journal || '') },
+      stats: {
+        clock: String(p.clock || ''),
+        saidToday: Number(p.saidToday) || 0,
+        saidLastHour: Number(p.saidLastHour) || 0,
+        pending: Number(p.pending) || 0,
+      },
+      alwaysWins: this.cfg.relayAlways === true,
+    };
+  }
+
+  /** 一个开关右边那句状态：只讲它现在到底在做什么，不讲能不能拨。 */
+  private switchStatus(key: (typeof CheckinWorld.SWITCH_KEYS)[number], p: Record<string, unknown>): string {
+    const quiet = p.quiet === true;
+    switch (key) {
+      case 'watchActivity': {
+        if (!this.host) return '扩展没在跑';
+        if (!this.petPresent) return '桌宠没开，停着';
+        if (quiet) return `安静时段 ${this.cfg.quietFrom ?? ''}–${this.cfg.quietTo ?? ''}，不采样`;
+        return p.watching ? `每 ${p.sampleSeconds} 秒看一次` : '关着，只剩跟进';
+      }
+      case 'lookEnabled': {
+        // 监测关着时 lookEveryMinutes() 也回 0，所以这句要先说，否则会误报成「把间隔填成 0 了」
+        if (!this.cfg.watchActivity) return '看前台没开，也停了';
+        if (this.cfg.lookEnabled === false) return '关着';
+        const every = this.lookEveryMinutes();
+        if (every <= 0) return '间隔填的 0，等于关';
+        if (!this.host || !this.petPresent) return '桌宠没开，停着';
+        if (quiet) return '安静时段，不主动看';
+        return `每 ${every} 分钟`;
+      }
+      case 'screenshot':
+        return this.cfg.screenshot === true
+          ? this.canSeeImages() ? '递由头时带一张' : '开着，但模型看不了图'
+          : '不带图';
+      case 'pokeNudge':
+        return this.cfg.pokeNudge === true ? '开着' : '关着';
+      case 'companion': {
+        if (!this.companionEnabled()) return '关着';
+        const every = Math.round(this.companionEveryMs() / 60_000);
+        return `每 ${every} 分钟一眼，共 ${this.companionMinutes()} 分钟`;
+      }
+      case 'backNudge':
+        // 回来是拿采样认的：没有采样就没有 away/back 判定，这个勾开着也不会响
+        if (this.cfg.backNudge !== true) return '关着';
+        if (!this.cfg.watchActivity) return '看前台没开，认不出回来';
+        return '回来打声招呼';
+      case 'relayAway':
+        return this.cfg.relayAlways === true ? '被「全程」盖住' : this.cfg.relayAway === true ? '离开后抄一份' : '不抄';
+      case 'relayAlways':
+        return this.cfg.relayAlways === true ? '全程都抄一份' : '不抄';
+      default:
+        return '';
+    }
+  }
+
+  /**
+   * 有没有哪个开关把这一项「架住」了：开着监测才认得出离开/回来、才知道该往哪看一眼。
+   * 被架住时面板上那个勾置灰（值不动，回头开监测就恢复），并说明为什么按不动。
+   */
+  private switchLock(key: (typeof CheckinWorld.SWITCH_KEYS)[number]): { locked: boolean; reason: string } {
+    if (this.cfg.watchActivity) return { locked: false, reason: '' };
+    if (key === 'lookEnabled' || key === 'backNudge') {
+      return { locked: true, reason: '监测关着，这一项用不上；先把上面的「监测」拨开' };
+    }
+    return { locked: false, reason: '' };
+  }
+
+  /** 读一个开关的当前值；`lookEnabled` 老配置里没这个键，按开着算。 */
+  private switchOn(key: (typeof CheckinWorld.SWITCH_KEYS)[number]): boolean {
+    const raw = (this.cfg as unknown as Record<string, unknown>)[key];
+    if (key === 'lookEnabled') return raw !== false;
+    return raw === true;
   }
 
   /**

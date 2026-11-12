@@ -4,6 +4,9 @@
 
 const REFRESH_MS = 5000;
 
+// 开关页最底下那行反馈渠道
+const FEEDBACK_EMAIL = '1735820759@qq.com';
+
 function errText(err) {
   return err instanceof Error ? err.message : String(err);
 }
@@ -215,10 +218,8 @@ function mountProbe(ctx) {
 
 function mountPending(ctx) {
   const ui = ctx.ui;
-  const sheet = ui.sheet({
-    title: '小本本',
-    desc: '它记着以后要回头问的事。到点会自己提，这里可以先看，也能直接结掉。提醒过一次、之后一直没有结果的会自动清掉。底下的「心事」决定它醒来写不写、什么时候写（改完自动存）。',
-  });
+  const sheet = ui.sheet({ title: '' });
+  hideHeading(sheet);
 
   const table = ui.table({ head: ['#', '要跟进的事', '什么时候提', ''], maxHeight: '320px' });
   const totalText = ui.h('span', 'mono', '—');
@@ -249,6 +250,16 @@ function mountPending(ctx) {
   timesBar.append(timesInput);
   const timesHint = ui.h('div', 'tdesc', '写 0900 这种四位数，逗号隔开多个；全半角逗号、分号、空格都行。');
 
+  // 心事.md 在哪：这一页最底下（开关页不再放路径了）
+  const journalText = ui.h('span', 'mono', '');
+  journalText.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.8';
+  const copyJournalBtn = ui.copyButton(() => journalText.textContent || '');
+  const journalBar = ui.h('div', null, '');
+  journalBar.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;max-width:100%';
+  const journalLabel = ui.h('span', null, '心事.md');
+  journalLabel.style.cssText = 'opacity:.6;white-space:nowrap;flex:none';
+  journalBar.append(journalLabel, journalText, copyJournalBtn);
+
   sheet.body.append(
     ui.field('共几条', totalText),
     table.el,
@@ -259,6 +270,7 @@ function mountPending(ctx) {
     ui.field('时刻', wakeModeSeg.el),
     ui.field('自定义', timesBar),
     timesHint,
+    journalBar,
     bar,
     message,
   );
@@ -432,6 +444,7 @@ function mountPending(ctx) {
         : parsed.length
           ? `现在会在 ${parsed.join('、')} 醒（每个时间点一天醒一次，两次之间至少隔 20 分钟）。`
           : '还没填时间。写 0900 这种四位数，逗号隔开，例如 0900, 2130。';
+    journalText.textContent = (res && typeof res.journal === 'string' && res.journal) || '';
   }
 
   async function refresh() {
@@ -453,6 +466,203 @@ function mountPending(ctx) {
   }, 15000);
 }
 
-const bundle = { panels: { probe: { mount: mountProbe }, pending: { mount: mountPending } } };
+// 面板「开关」：一行一个开关，右边是它现在的状态，下面紧跟着同一回事的细节。
+// 条目顺序必须和用户要的顺序一致；key 照抄 world.ts 的 SWITCH_KEYS（那边按同一顺序排）。
+const SWITCH_ROWS = [
+  { key: 'watchActivity', label: '监测', hint: '看前台窗口。关掉后离开、回来、待久、落账都停，只剩到点提醒和戳摸。' },
+  { key: 'lookEnabled', label: '看一眼', hint: '隔一阵主动看一眼屏幕。多久一次在设置页「看一眼屏幕」里填。' },
+  { key: 'screenshot', label: '截图', hint: '递由头时顺手带一张屏幕截图（模型能看图时）。' },
+  { key: 'pokeNudge', label: '连戳两下', hint: '连戳桌宠两下，就递一条由头。' },
+  { key: 'companion', label: '连摸两下', hint: '连摸桌宠两下，接下来陪你说几眼。' },
+  { key: 'backNudge', label: '欢迎回来', hint: '离开一阵子再回来，打声招呼。' },
+  { key: 'relayAway', label: '离开时转 QQ', hint: '人不在的时候，桌宠冒的泡抄一份发到 QQ。' },
+  { key: 'relayAlways', label: '全程转 QQ', hint: '开着就全程抄送，上面那条「离开时」就不起作用了。' },
+];
+
+// 卡片顶部那行标题是宿主 ui.sheet() 无条件塞进来的 <h3>（里面还藏着 note 小标签），
+// 传空字符串也只是留个空行。想要「没有标题」就得自己把它藏掉——不碰宿主 CSS。
+function hideHeading(sheet) {
+  const head = sheet && sheet.el && sheet.el.firstElementChild;
+  if (head && head.style) head.style.display = 'none';
+}
+
+// 宿主的表格是 auto 布局：列宽由内容撑。拨一下开关后状态文字变长、跨三列的灰字行换行，
+// 都会让浏览器重新分列宽——看起来就是「后面两栏往右移」。钉死列宽就没有这个问题了。
+function lockColumns(table, widths) {
+  const tbl = table && table.el && table.el.firstElementChild;
+  if (!tbl || !tbl.style) return;
+  tbl.style.tableLayout = 'fixed';
+  tbl.style.width = '100%';
+  const doc = tbl.ownerDocument;
+  if (!doc || typeof doc.createElement !== 'function') return;
+  const colgroup = doc.createElement('colgroup');
+  for (const w of widths) {
+    const col = doc.createElement('col');
+    if (w) col.style.width = w;
+    colgroup.appendChild(col);
+  }
+  tbl.insertBefore(colgroup, tbl.firstChild);
+}
+
+function mountSwitches(ctx) {
+  const ui = ctx.ui;
+  const sheet = ui.sheet({ title: '' });
+  hideHeading(sheet);
+
+  const message = ui.msgline('');
+  const table = ui.table({ head: ['开关', '拨一下', '现在'] });
+  // 名字一栏按比例，勾一栏刚好放得下，剩下的都给状态那句
+  lockColumns(table, ['40%', '96px', '']);
+  const boxes = new Map();
+  const statuses = new Map();
+  // 同一个开关下面的细节行：key -> 元素数组（按顺序填）
+  const details = { watch: [], companion: [] };
+
+  function say(text, bad) {
+    message.textContent = text || '';
+    message.classList.toggle('bad', Boolean(bad));
+  }
+
+  // 细节行：跨三列的一行小灰字，挂在它上面那个开关后面
+  function detailRow(bucket) {
+    const line = ui.h('div', null, '');
+    line.style.cssText = 'font-size:12px;opacity:.55;line-height:1.5;white-space:pre-wrap';
+    const tr = table.addRow([line]);
+    const td = tr && tr.cells && tr.cells[0];
+    if (td) td.colSpan = 3;
+    bucket.push(line);
+    return line;
+  }
+
+  function switchRow(row) {
+    const name = ui.h('span', null, row.label);
+    name.title = row.hint;
+    const box = ui.checkbox('', {
+      title: row.hint,
+      onChange: (checked) => void save(row.key, checked),
+    });
+    // 宿主表格里的勾走通用规则：16×16、圆角 4px、勾图 12px。那条选择器全是 :where()，
+    // 特异性只有一层，写成行内样式就压得住，不用 !important，也不用改宿主 CSS。
+    box.input.style.width = '20px';
+    box.input.style.height = '20px';
+    box.input.style.borderRadius = '5px';
+    box.input.style.backgroundSize = '15px 15px';
+    boxes.set(row.key, box);
+    const status = ui.h('span', null, '');
+    status.style.cssText = 'opacity:.7;font-size:12px';
+    statuses.set(row.key, status);
+    table.addRow([name, box.el, status]);
+    return box;
+  }
+
+  for (const row of SWITCH_ROWS) {
+    switchRow(row);
+    if (row.key === 'watchActivity') {
+      // 前台是哪个程序、几分钟没碰键鼠、连着多久同一件事——不在这儿显示了，
+      // 只留最近一小时这条概览
+      detailRow(details.watch);
+    } else if (row.key === 'companion') {
+      detailRow(details.companion);
+    }
+  }
+
+  const stats = ui.h('div', null, '');
+  stats.style.cssText = 'font-size:12px;opacity:.55;margin-top:8px';
+
+  // 最底下留个说话的地方：有问题、有想法直接发这个邮箱。
+  // 邮箱写成常量，复制按钮和显示用的是同一份，别改一处忘一处。
+  const feedbackText = ui.h('span', null, '');
+  feedbackText.style.cssText = 'font-size:12px;opacity:.55';
+  feedbackText.textContent = `反馈渠道：${FEEDBACK_EMAIL}`;
+  const copyFeedbackBtn = ui.button('复制邮箱', {
+    size: 'sm',
+    onClick: () => void copyPath(FEEDBACK_EMAIL, copyFeedbackBtn),
+  });
+  const feedbackBar = ui.rowbar();
+  feedbackBar.append(feedbackText, copyFeedbackBtn);
+
+  sheet.body.append(table.el, stats, feedbackBar, message);
+
+  function fill(els, texts) {
+    els.forEach((el, i) => {
+      const text = texts[i] || '';
+      el.textContent = text;
+      el.hidden = !text;
+    });
+  }
+
+  // 一个勾现在的说明：被别的开关架住时换成那句原因，否则用默认提示
+  function hintOf(key, locked, lockReason) {
+    if (locked && lockReason) return lockReason;
+    const row = SWITCH_ROWS.find((r) => r.key === key);
+    return (row && row.hint) || '';
+  }
+
+  function render(res) {
+    const list = Array.isArray(res && res.switches) ? res.switches : [];
+    for (const item of list) {
+      const box = boxes.get(item.key);
+      if (box) {
+        box.setChecked(item.on === true);
+        // 服务端说这一项现在用不上（比如监测关着时的「看前台」「欢迎回来」）：
+        // 勾置灰、按不动，鼠标停上去说明为什么。值不重置，回头开监测还在。
+        const locked = item.locked === true;
+        box.input.disabled = locked;
+        box.el.title = hintOf(item.key, locked, item.lockReason);
+        box.el.style.opacity = locked ? '.45' : '';
+      }
+      const status = statuses.get(item.key);
+      if (status) status.textContent = item.status || '';
+    }
+    const info = (res && res.info) || {};
+    const watch = info.watch || {};
+    fill(details.watch, [watch.recent || '']);
+    fill(details.companion, [(info.companion && info.companion.state) || '']);
+    const s = (res && res.stats) || {};
+    stats.textContent = `今天说了 ${s.saidToday || 0} 条 · 最近一小时 ${s.saidLastHour || 0} 条 · 暂存 ${s.pending || 0} 条`;
+    // 「全程转 QQ」开着时，「离开时转 QQ」的勾会失效：把它标出来，别让人以为坏了
+    const alwaysBox = boxes.get('relayAlways');
+    const awayBox = boxes.get('relayAway');
+    if (alwaysBox && awayBox) {
+      const off = alwaysBox.checked;
+      awayBox.input.disabled = off;
+      awayBox.el.title = off ? '「全程转 QQ」开着，这条暂时用不上' : SWITCH_ROWS.find((r) => r.key === 'relayAway').hint;
+    }
+  }
+
+  async function save(key, checked) {
+    const box = boxes.get(key);
+    try {
+      const res = await ctx.invoke('save', [{ [key]: checked }]);
+      if (ctx.signal && ctx.signal.aborted) return;
+      render(res);
+      say(checked ? '开了' : '关了', false);
+    } catch (err) {
+      if (ctx.signal && ctx.signal.aborted) return;
+      if (box) box.setChecked(!checked);
+      say(`没存上：${errText(err)}`, true);
+    }
+  }
+
+  async function refresh() {
+    try {
+      const res = await ctx.invoke('list');
+      if (ctx.signal && ctx.signal.aborted) return;
+      render(res);
+      say('', false);
+    } catch (err) {
+      if (ctx.signal && ctx.signal.aborted) return;
+      say(`读不到：${errText(err)}`, true);
+    }
+  }
+
+  void refresh();
+  ctx.interval(() => {
+    void refresh();
+  }, 15000);
+  ctx.root.appendChild(sheet.el);
+}
+
+const bundle = { panels: { pending: { mount: mountPending }, switches: { mount: mountSwitches } } };
 
 export { bundle as default };
